@@ -4,14 +4,25 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'background_handler.dart';
 import 'video_call_screen.dart';
 
+// REPLACE your existing notification initialization in main() with this structured routing logic:
+
+@pragma('vm:entry-point')
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Initialize notification channels safely on the main UI Isolate thread
+  // FIXED: Explicitly pre-initialize WebRTC hardware bindings on the main UI isolate thread
+  // before any background services spin up or notifications route traffic.
+  try {
+    WebRTC.initialize();
+  } catch (e) {
+    debugPrint("WebRTC native binding pass: $e");
+  }
+
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
@@ -24,7 +35,6 @@ void main() async {
     enableVibration: true,
   );
 
-  // FIXED: Explicitly passing the type as a generic parameter prevents the platform lookup from panicking
   final androidImplementation = flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin
@@ -37,17 +47,30 @@ void main() async {
   const initializationSettingsAndroid = AndroidInitializationSettings(
     '@mipmap/ic_launcher',
   );
+
   await flutterLocalNotificationsPlugin.initialize(
     const InitializationSettings(android: initializationSettingsAndroid),
-    onDidReceiveNotificationResponse: notificationTapBackgroundHandler,
+    onDidReceiveNotificationResponse: (NotificationResponse response) {
+      // Directs the UI tap event cleanly into the communication bus
+      if (response.actionId == 'accept_call') {
+        FlutterBackgroundService().invoke("notificationAction", {
+          "action": "accept",
+        });
+      } else if (response.actionId == 'decline_call') {
+        FlutterBackgroundService().invoke("notificationAction", {
+          "action": "decline",
+        });
+      } else {
+        // Tapping the body of the notification opens the app to inspect the current state
+        FlutterBackgroundService().invoke("checkStatus");
+      }
+    },
     onDidReceiveBackgroundNotificationResponse:
         notificationTapBackgroundHandler,
   );
 
-  // 2. Launch UI immediately so the user doesn't see a black splash screen
   runApp(const MyApp());
 
-  // 3. Fire off the signaling worker service asynchronously
   scheduleMicrotask(() async {
     await initializeBackgroundService();
   });
@@ -91,49 +114,46 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _bindCommunicationChannel() {
+    void _bindCommunicationChannel() {
     _serviceSubscription = FlutterBackgroundService()
         .on('onSignalReceived')
         .listen((event) {
           if (event == null || event['data'] == null) return;
 
           print("!! FOREGROUND UI ISOLATE RECEIVED PACKET: ${event['data']}");
-
           var data = jsonDecode(event['data']);
 
           if (!_isOnline) {
             setState(() => _isOnline = true);
           }
 
-          if (data['type'] == 'offer') {
-            setState(() => _remoteSdpOffer = data['sdp']);
+          if (data['type'] == 'offer' || data['type'] == 'accept-from-notification') {
+            // FIXED: Guard against duplicate concurrent routing attempts if a call screen is already live
+            if (mounted && !VideoCallScreen.isActive) {
+              
+              // 1. Capture payload data structures cleanly
+              final sdpPayload = data['sdp'];
+              final senderIdPayload = data['senderId'] ?? 'browser_node';
 
-            if (mounted) {
-              // Wrap variables cleanly inside a dictionary so the WebRTC screen
-              // can read both the unique sender string and the SDP parameters!
+              // 2. Clear out local state immediately to break the multi-fire loop
+              setState(() {
+                _remoteSdpOffer = null; 
+              });
+
+              // 3. Route to the call interface safely
               Navigator.pushNamed(
                 context,
                 '/call',
                 arguments: {
-                  'sdp': data['sdp'],
-                  'senderId': data['senderId'] ?? 'browser_node',
-                },
-              );
-            }
-          } else if (data['type'] == 'accept-from-notification') {
-            if (mounted) {
-              Navigator.pushNamed(
-                context,
-                '/call',
-                arguments: {
-                  'sdp': data['sdp'],
-                  'senderId': data['senderId'] ?? 'browser_node',
+                  'sdp': sdpPayload,
+                  'senderId': senderIdPayload,
                 },
               );
             }
           }
         });
   }
+
 
   @override
   void dispose() {
