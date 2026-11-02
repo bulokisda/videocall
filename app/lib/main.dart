@@ -99,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
   dynamic _remoteSdpOffer;
   StreamSubscription? _serviceSubscription;
   // bool _isNavigatingToCall = false;
+  List<dynamic> _discoveredNetworkPeers = [];
 
   @override
   void initState() {
@@ -153,6 +154,13 @@ class _HomeScreenState extends State<HomeScreen> {
               });
             }
           }
+          if (data['type'] == 'mesh-peer-list') {
+            if (mounted) {
+              setState(() {
+                _discoveredNetworkPeers = data['peers'] ?? [];
+              });
+            }
+          }
         });
   }
 
@@ -192,6 +200,42 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: const Text("Answer Call from UI"),
               ),
             ],
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+              onPressed: () {
+                // Find the first peer whose type profile equals 'browser'
+                final browserNode = _discoveredNetworkPeers.firstWhere(
+                  (peer) => peer['type'] == 'browser',
+                  orElse: () => null,
+                );
+
+                if (browserNode != null && browserNode['id'] != null) {
+                  String actualBrowserRuntimeId = browserNode['id'];
+                  debugPrint(
+                    "--> Routing outbound offer cleanly to actual target ID: $actualBrowserRuntimeId",
+                  );
+
+                  Navigator.pushNamed(
+                    context,
+                    '/call',
+                    arguments: {
+                      'isCaller': true,
+                      'targetId': actualBrowserRuntimeId, // Pass the dynamic real ID here!
+                    },
+                  );
+                } else {
+                  // Show an error toast or snackbar if no browser is connected to the server yet
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        "Cannot initiate call: No active browser peer discovered online yet.",
+                      ),
+                    ),
+                  );
+                }
+              },
+              child: const Text("Call Browser"),
+            ),
           ],
         ),
       ),

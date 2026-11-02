@@ -59,34 +59,79 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   // Inside video_call_screen.dart -> Add this tracking variable to your State class
-  bool _isHardwareConfiguredDone = false;
+  // bool _isHardwareConfiguredDone = false;
 
-  // Modify the _bootstrapWebRTC method to look like this:
   void _bootstrapWebRTC(dynamic args) async {
-    // FIXED: An absolute synchronous gate check before any asynchronous calls run
-    if (_isHardwareConfiguredDone) {
-      debugPrint(
-        "--> Absolute Guard: Blocked duplicate bootstrap entry layout.",
-      );
-      return;
-    }
-    _isHardwareConfiguredDone = true; // Lock immediately
+  try {
+    await _localRenderer.initialize();
+    await _initializeLocalHardware();
+    _bindMeshCallSignaling();
 
-    try {
-      await _localRenderer.initialize();
-      await _initializeLocalHardware();
-      _bindMeshCallSignaling();
+    if (args != null && args is Map) {
+      // Check if we are initiating the call or answering
+      bool isCaller = args['isCaller'] ?? false;
+      String targetPeerId = args['targetId'] ?? "browser_node";
 
-      if (args != null && args is Map) {
+      if (isCaller) {
+        debugPrint("--> App initiating outgoing call to $targetPeerId");
+        await _createOutgoingMeshOffer(targetPeerId);
+      } else {
+        // Existing incoming call answer workflow
         String actualSenderId = args['senderId'] ?? "browser_node";
         dynamic remoteSdp = args['sdp'];
         await _handleIncomingMeshOffer(actualSenderId, remoteSdp);
       }
-    } catch (e) {
-      _isHardwareConfiguredDone = false; // Reset lock on error
-      debugPrint("Initialization failure: $e");
     }
+  } catch (e) {
+    debugPrint("Initialization failure: $e");
   }
+}
+
+
+Future<void> _createOutgoingMeshOffer(String targetPeerId) async {
+  if (_peerConnections.containsKey(targetPeerId)) return;
+
+  try {
+    _isHandshakeComplete = false;
+
+    // 1. Create a fresh peer node connection mapping
+    RTCPeerConnection pc = await _createNewPeerConnectionNode(targetPeerId);
+
+    // 2. Attach our camera/microphone tracks BEFORE creating the offer
+    if (_localStream != null) {
+      for (var track in _localStream!.getTracks()) {
+        await pc.addTrack(track, _localStream!);
+        debugPrint("--> Attached outgoing track (${track.kind}) to $targetPeerId");
+      }
+    }
+
+    // 3. Generate the WebRTC offer SDP
+    RTCSessionDescription offer = await pc.createOffer({
+      'mandatory': {'OfferToReceiveAudio': true, 'OfferToReceiveVideo': true},
+    });
+    
+    // 4. Save locally to start generating our ICE candidates
+    await pc.setLocalDescription(offer);
+
+    // 5. Send it to the background isolate to deliver to the browser node
+    FlutterBackgroundService().invoke('sendSignal', {
+      'payload': json.encode({
+        'type': 'offer',
+        'targetId': targetPeerId,
+        'sdp': offer.sdp,
+      }),
+    });
+
+    // Note: The browser will process this offer, generate an 'answer', 
+    // and send it back. Your existing '_handleIncomingMeshAnswer' 
+    // method will automatically handle the incoming answer payload when it arrives!
+
+  } catch (e) {
+    debugPrint("Failed to create outgoing call session: $e");
+    _closeAllCallsAndExit();
+  }
+}
+
 
   // video_call_screen.dart
 
@@ -414,7 +459,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   void _closeAllCallsAndExit() async {
     VideoCallScreen.isActive = false;
     _isHardwareReady = false;
-    _isHardwareConfiguredDone = false;
+    // _isHardwareConfiguredDone = false;
 
 
     String? activePeerId = _peerConnections.keys.isNotEmpty
