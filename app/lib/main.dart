@@ -9,14 +9,10 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'background_handler.dart';
 import 'video_call_screen.dart';
 
-// REPLACE your existing notification initialization in main() with this structured routing logic:
-
 @pragma('vm:entry-point')
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // FIXED: Explicitly pre-initialize WebRTC hardware bindings on the main UI isolate thread
-  // before any background services spin up or notifications route traffic.
   try {
     WebRTC.initialize();
   } catch (e) {
@@ -51,7 +47,6 @@ void main() async {
   await flutterLocalNotificationsPlugin.initialize(
     const InitializationSettings(android: initializationSettingsAndroid),
     onDidReceiveNotificationResponse: (NotificationResponse response) {
-      // Directs the UI tap event cleanly into the communication bus
       if (response.actionId == 'accept_call') {
         FlutterBackgroundService().invoke("notificationAction", {
           "action": "accept",
@@ -61,7 +56,6 @@ void main() async {
           "action": "decline",
         });
       } else {
-        // Tapping the body of the notification opens the app to inspect the current state
         FlutterBackgroundService().invoke("checkStatus");
       }
     },
@@ -104,56 +98,63 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = false;
   dynamic _remoteSdpOffer;
   StreamSubscription? _serviceSubscription;
+  // bool _isNavigatingToCall = false;
 
   @override
   void initState() {
     super.initState();
+
+    // Wipes any stale stream registration before creating a clean hook
+    _serviceSubscription?.cancel();
     _bindCommunicationChannel();
+
     Future.delayed(const Duration(milliseconds: 1000), () {
       FlutterBackgroundService().invoke('checkStatus');
     });
   }
 
-    void _bindCommunicationChannel() {
+  // main.dart -> Inside _HomeScreenState class
+  bool _isProcessingNavigationLock = false; // Add this class variable
+
+  void _bindCommunicationChannel() {
     _serviceSubscription = FlutterBackgroundService()
         .on('onSignalReceived')
         .listen((event) {
           if (event == null || event['data'] == null) return;
 
-          print("!! FOREGROUND UI ISOLATE RECEIVED PACKET: ${event['data']}");
           var data = jsonDecode(event['data']);
 
           if (!_isOnline) {
             setState(() => _isOnline = true);
           }
 
-          if (data['type'] == 'offer' || data['type'] == 'accept-from-notification') {
-            // FIXED: Guard against duplicate concurrent routing attempts if a call screen is already live
-            if (mounted && !VideoCallScreen.isActive) {
-              
-              // 1. Capture payload data structures cleanly
+          if (data['type'] == 'accept-from-notification') {
+            // FIXED: Strict structural guard checking the active window status and tracking loop
+            if (mounted &&
+                !VideoCallScreen.isActive &&
+                !_isProcessingNavigationLock) {
+              _isProcessingNavigationLock =
+                  true; // Lock execution track instantly
+
               final sdpPayload = data['sdp'];
               final senderIdPayload = data['senderId'] ?? 'browser_node';
 
-              // 2. Clear out local state immediately to break the multi-fire loop
               setState(() {
-                _remoteSdpOffer = null; 
+                _remoteSdpOffer = null;
               });
 
-              // 3. Route to the call interface safely
               Navigator.pushNamed(
                 context,
                 '/call',
-                arguments: {
-                  'sdp': sdpPayload,
-                  'senderId': senderIdPayload,
-                },
-              );
+                arguments: {'sdp': sdpPayload, 'senderId': senderIdPayload},
+              ).then((_) {
+                // Reset navigation lock when returning back to HomeScreen
+                _isProcessingNavigationLock = false;
+              });
             }
           }
         });
   }
-
 
   @override
   void dispose() {

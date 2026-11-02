@@ -26,13 +26,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   // bool _isInitialized = false;
   bool _isHandshakeComplete = false;
   bool _hasStartedBootstrap = false;
-  bool _isHardwareAllocationLocked = false;
   String? _myNodeId;
 
   final Map<String, dynamic> _rtcConfig = {
     'iceServers': [
       {
-        'urls': ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'],
+        'urls': [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+        ],
       },
     ],
     'sdpSemantics': 'unified-plan',
@@ -43,12 +45,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     super.initState();
     VideoCallScreen.isActive = true;
 
-    // FIXED: Executing directly out of initState ensures that no matter how 
+    // FIXED: Executing directly out of initState ensures that no matter how
     // many layout frame updates occur, the loop triggers exactly once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_hasStartedBootstrap) {
         _hasStartedBootstrap = true;
-        
+
         // Safely extract the arguments from the modal context inside post-frame layout bounds
         final remoteSdpArgs = ModalRoute.of(context)?.settings.arguments;
         _bootstrapWebRTC(remoteSdpArgs);
@@ -56,13 +58,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     });
   }
 
-  // FIXED: Simplified bootstrap setup with absolute execution isolation
+  // Inside video_call_screen.dart -> Add this tracking variable to your State class
+  bool _isHardwareConfiguredDone = false;
+
+  // Modify the _bootstrapWebRTC method to look like this:
   void _bootstrapWebRTC(dynamic args) async {
+    // FIXED: An absolute synchronous gate check before any asynchronous calls run
+    if (_isHardwareConfiguredDone) {
+      debugPrint(
+        "--> Absolute Guard: Blocked duplicate bootstrap entry layout.",
+      );
+      return;
+    }
+    _isHardwareConfiguredDone = true; // Lock immediately
+
     try {
       await _localRenderer.initialize();
-      _bindMeshCallSignaling();
-      
       await _initializeLocalHardware();
+      _bindMeshCallSignaling();
 
       if (args != null && args is Map) {
         String actualSenderId = args['senderId'] ?? "browser_node";
@@ -70,79 +83,83 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         await _handleIncomingMeshOffer(actualSenderId, remoteSdp);
       }
     } catch (e) {
+      _isHardwareConfiguredDone = false; // Reset lock on error
       debugPrint("Initialization failure: $e");
     }
   }
 
+  // video_call_screen.dart
+
   @override
   void dispose() {
     VideoCallScreen.isActive = false;
-    _serviceSubscription?.cancel();
+
+    if (_serviceSubscription != null) {
+      _serviceSubscription!.cancel();
+      _serviceSubscription = null;
+      debugPrint("--> Cleaned up zombie signaling stream listener.");
+    }
+
     _localRenderer.dispose();
     super.dispose();
   }
 
+  bool _isHardwareReady = false;
 
-  // 2. Replace your existing _initializeLocalHardware method with this implementation:
   Future<void> _initializeLocalHardware() async {
-    // FIXED: An atomic guard gate. If this method is called a second time 
-    // while the first one is running or completed, it drops out instantly.
-    if (_isHardwareAllocationLocked) {
-      debugPrint("--> Blocked duplicate parallel hardware track allocation attempt.");
+    // 1. FIXED: Synchronous block check. No await before this line!
+    if (_isHardwareReady || _localStream != null) {
+      debugPrint("--> Atomic Guard: Dropped parallel stream setup.");
       return;
     }
-    
+    _isHardwareReady = true; // Lock the execution track instantly
+
     try {
-      _isHardwareAllocationLocked = true; // Lock the gate immediately
-      
-      debugPrint("--> Requesting hardware permissions and initializing media streams...");
-      
+      debugPrint(
+        "--> Requesting hardware permissions and initializing media streams...",
+      );
+
       _localStream = await navigator.mediaDevices.getUserMedia({
         'audio': false,
-        'video': {
-          'width': 640,
-          'height': 480,
-          'facingMode': 'user',
-        },
+        'video': {'width': 640, 'height': 480, 'facingMode': 'user'},
       });
-      
+
       if (mounted && _localStream != null) {
         setState(() {
           _localRenderer.srcObject = _localStream;
         });
-        debugPrint("--> Video hardware track successfully mapped and rendered.");
+        debugPrint(
+          "--> Video hardware track successfully mapped and rendered.",
+        );
       }
 
-      // Safe, delayed separation for the audio channel track allocation
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 250));
 
       if (mounted && VideoCallScreen.isActive) {
         try {
           MediaStream audioStream = await navigator.mediaDevices.getUserMedia({
-            'audio': {
-              'echoCancellation': true,
-              'noiseSuppression': true,
-            },
+            'audio': {'echoCancellation': true, 'noiseSuppression': true},
             'video': false,
           });
 
-          if (audioStream.getAudioTracks().isNotEmpty) {
+          if (audioStream.getAudioTracks().isNotEmpty && _localStream != null) {
             final audioTrack = audioStream.getAudioTracks().first;
             await _localStream?.addTrack(audioTrack);
-            debugPrint("--> Audio hardware track successfully mapped into stream pool.");
+            debugPrint(
+              "--> Audio hardware track successfully mapped into stream pool.",
+            );
           }
         } catch (audioError) {
-          debugPrint("Bypassed non-fatal Audio initialization variance: $audioError");
+          debugPrint(
+            "Bypassed non-fatal Audio initialization variance: $audioError",
+          );
         }
       }
-
     } catch (e) {
-      _isHardwareAllocationLocked = false; // Release the gate only on a true fatal exception
+      _isHardwareReady = false; // Reset only on a genuine failure
       debugPrint("CRITICAL: Camera/Microphone access failed: $e");
     }
   }
-
-
 
   void _bindMeshCallSignaling() {
     _serviceSubscription = FlutterBackgroundService()
@@ -159,6 +176,13 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
             case 'offer':
               if (peerId == null || peerId == _myNodeId) return;
+              // If we are already handling a connection with this peer, drop duplication
+              if (_peerConnections.containsKey(peerId)) {
+                debugPrint(
+                  "--> Ignored duplicate offer packet for active peer: $peerId",
+                );
+                return;
+              }
               await _handleIncomingMeshOffer(peerId, data['sdp']);
               break;
 
@@ -263,8 +287,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       _activeHandshakesInFlight.add(peerId);
       _isHandshakeComplete = false;
 
-      // FIXED: Safely verify if a node is currently under construction.
-      // If it isn't, create it. If it is under construction, wait for it to complete.
       RTCPeerConnection pc;
       if (!_peerConnections.containsKey(peerId)) {
         pc = await _createNewPeerConnectionNode(peerId);
@@ -283,22 +305,31 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         sdpString += '\r\n';
       }
 
-      // Ensure the native C++ handle exists before executing native methods
+      // 1. First set the remote description from the browser
       await pc.setRemoteDescription(RTCSessionDescription(sdpString, 'offer'));
 
+      // 2. FIXED: Attach local tracks BEFORE creating the Answer SDP
+      // This forces WebRTC to write the tablet's camera streams into the answer payload.
+      if (_localStream != null) {
+        for (var track in _localStream!.getTracks()) {
+          try {
+            await pc.addTrack(track, _localStream!);
+            debugPrint(
+              "--> Attached local track (${track.kind}) to peer $peerId before generating SDP.",
+            );
+          } catch (e) {
+            debugPrint("Track attach error: $e");
+          }
+        }
+      }
+
+      // 3. Now generate the Answer containing the attached media blocks
       RTCSessionDescription answer = await pc.createAnswer({
         'mandatory': {'OfferToReceiveAudio': true, 'OfferToReceiveVideo': true},
       });
       await pc.setLocalDescription(answer);
 
-      if (_localStream != null) {
-        for (var track in _localStream!.getTracks()) {
-          try {
-            await pc.addTrack(track, _localStream!);
-          } catch (_) {}
-        }
-      }
-
+      // 4. Ship the complete, track-aware Answer to the signaling server
       FlutterBackgroundService().invoke('sendSignal', {
         'payload': json.encode({
           'type': 'answer',
@@ -379,14 +410,43 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }
   }
 
+  // video_call_screen.dart -> Inside _closeAllCallsAndExit()
   void _closeAllCallsAndExit() async {
     VideoCallScreen.isActive = false;
+    _isHardwareReady = false;
+    _isHardwareConfiguredDone = false;
 
-    _localStream?.getTracks().forEach((track) => track.stop());
-    await _localStream?.dispose();
-    _localStream = null;
 
-    // Use a snapshot list to clear connections safely without modifying the collection during iteration
+    String? activePeerId = _peerConnections.keys.isNotEmpty
+        ? _peerConnections.keys.first
+        : null;
+
+    try {
+      if (activePeerId != null) {
+        FlutterBackgroundService().invoke('sendSignal', {
+          'payload': json.encode({'type': 'hangup', 'targetId': activePeerId}),
+        });
+      }
+
+      // This triggers the 'decline' action block we fixed above, emptying the queues
+      FlutterBackgroundService().invoke("notificationAction", {
+        "action": "decline",
+      });
+
+      FlutterBackgroundService().invoke('sendSignal', {
+        'payload': json.encode({'type': 'register-tablet'}),
+      });
+    } catch (e) {
+      debugPrint("Error sending clean hangup signal: $e");
+    }
+
+    if (_localStream != null) {
+      _localStream!.getTracks().forEach((track) => track.stop());
+      await _localStream!.dispose();
+      _localStream = null;
+    }
+
+    // Wiping connections completely
     final activePeers = List<String>.from(_peerConnections.keys);
     for (var peerId in activePeers) {
       final pc = _peerConnections.remove(peerId);
@@ -404,8 +464,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       } catch (_) {}
     }
 
+    // FIXED: Explicitly reset structural control flags to initial states
+    _bufferedRemoteIceCandidates.clear();
+    _activeHandshakesInFlight.clear();
+    _hasStartedBootstrap = false;
+    _isHandshakeComplete = false;
+
+    if (_serviceSubscription != null) {
+      await _serviceSubscription!.cancel();
+      _serviceSubscription = null;
+      debugPrint("--> Terminated subscription on explicit call exit.");
+    }
+
     if (mounted) {
-      Navigator.pushReplacementNamed(context, '/');
+      Navigator.popUntil(context, ModalRoute.withName('/'));
     }
   }
 
