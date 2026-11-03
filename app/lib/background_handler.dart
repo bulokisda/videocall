@@ -32,10 +32,9 @@ Future<void> initializeBackgroundService() async {
 
 @pragma('vm:entry-point')
 void notificationTapBackgroundHandler(NotificationResponse response) {
-  // FIXED: Leave this completely empty! 
+  // FIXED: Leave this completely empty!
   // The foreground initialization loop in main.dart handles this cleanly.
 }
-
 
 @pragma('vm:entry-point')
 void onStartBackgroundEngine(ServiceInstance service) {
@@ -52,7 +51,10 @@ void onStartBackgroundEngine(ServiceInstance service) {
         Uri.parse(signalingServerUrl),
       );
 
-      backgroundSocket!.sink.add(json.encode({'type': 'register-tablet'}));
+      // FIXED: If the background service already has a registeredId, pass it to preserve the session!
+      backgroundSocket!.sink.add(
+        json.encode({'type': 'register-tablet', 'id': registeredId}),
+      );
 
       backgroundHeartbeat = Timer.periodic(const Duration(seconds: 20), (
         timer,

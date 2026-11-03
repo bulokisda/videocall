@@ -38,3 +38,18 @@ The tablet app when launched allows the tablet user to connect to the room and t
 Browser specifications:
 In the browser the index.html allows the user to connect to the room before displaying the local video, then the user can call any other connected user in the room.
 
+      {
+        'urls': ['turn:openrelay.metered.ca:80'],
+        'username': 'openrelayproject',
+        'credential': 'openrelayprojectsecret',
+      },
+      {
+        'urls': ['turn:openrelay.metered.ca:443'],
+        'username': 'openrelayproject',
+        'credential': 'openrelayprojectsecret',
+      },
+      {
+        'urls': ['turn:openrelay.metered.ca:443?transport=tcp'],
+        'username': 'openrelayproject',
+        'credential': 'openrelayprojectsecret',
+      }
