@@ -185,9 +185,14 @@
                     btn.className = "privacy-btn active";
                     document.getElementById('myIdDisplay').innerText = "Registering...";
                     
+                    // Inside toggleLocalMedia() -> when !isMediaActive is true
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: '' }));
+                        ws.send(JSON.stringify({ 
+                            type: 'register-browser',
+                            id: myId 
+                        }));
                     }
+
                 } catch (err) {
                     console.error("Camera access denied or blocked by user:", err);
                     alert("Could not start media: Please verify camera permissions.");
