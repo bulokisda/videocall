@@ -164,7 +164,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       );
 
       _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': false,
+        'audio': {'echoCancellation': true, 'noiseSuppression': true},
         'video': {'width': 640, 'height': 480, 'facingMode': 'user'},
       });
 
@@ -173,7 +173,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           _localRenderer.srcObject = _localStream;
         });
         debugPrint(
-          "--> Video hardware track successfully mapped and rendered.",
+          "--> Audio and Video hardware tracks successfully mapped in a single pass.",
         );
       }
 
