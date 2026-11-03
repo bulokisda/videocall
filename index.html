@@ -17,7 +17,7 @@
     </style>
 </head>
 <body>
-    <h1>Private WebRTC Workspace2</h1>
+    <h1>Private WebRTC TURN</h1>
     <div>Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Establishing connection to signaling engine...</span></div>
     <br>
     <button id="mediaToggleBtn" onclick="toggleLocalMedia()">Start Camera & Join Room</button>
@@ -40,16 +40,23 @@
                 { urls: 'stun:stun1.l.google.com:19302' },
                 // Metered.ca Open Relay Fallback Cluster
                 {
-                    urls: [
-                        'turn:openrelay.metered.ca:80',
-                        'turn:openrelay.metered.ca:443',
-                        'turn:openrelay.metered.ca:443?transport=tcp'
-                    ],
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayprojectsecret'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayprojectsecret'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
                     username: 'openrelayproject',
                     credential: 'openrelayprojectsecret'
                 }
             ] 
         };
+
 
         let ws = null;
         let localStream = null;
