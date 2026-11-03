@@ -53,17 +53,24 @@ wss.on('connection', (ws) => {
                     break;
             
                 case 'register-browser':
+                    // Clear out by matching socket wire reference
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
                     });
                 
-                    // Fall back to a new ID only if an existing one wasn't passed back during a reconnect
+                    // FIXED: If an ID was explicitly passed, purge any stale socket mapping tied to it first
+                    if (data.id && clients.has(data.id)) {
+                        console.log(`Purging stale socket reference for existing node session: ${data.id}`);
+                        clients.delete(data.id);
+                    }
+                
                     clientId = data.id || 'browser_' + Math.random().toString(36).substr(2, 5);
                     clients.set(clientId, { socket: ws, type: 'browser' });
                     console.log(`Web Browser Node Registered: ${clientId}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
+
 
                 case 'offer':
                 case 'answer':
