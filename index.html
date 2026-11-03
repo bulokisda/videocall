@@ -55,7 +55,10 @@
                 
                 if (isMediaActive && !myId) {
                     idDisplay.innerText = "Re-registering...";
-                    ws.send(JSON.stringify({ type: 'register-browser' }));
+                    ws.send(JSON.stringify({ 
+                        type: 'register-browser', 
+                        id: myId // If null, the server generates a new one. If populated, it re-binds your active session!
+                    }));
                 } else if (!isMediaActive) {
                     // Fix: Update the text when loading the page for the first time
                     idDisplay.innerText = "Start Camera to Join Room";
@@ -183,7 +186,7 @@
                     document.getElementById('myIdDisplay').innerText = "Registering...";
                     
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'register-browser' }));
+                        ws.send(JSON.stringify({ type: '' }));
                     }
                 } catch (err) {
                     console.error("Camera access denied or blocked by user:", err);
