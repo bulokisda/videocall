@@ -160,9 +160,10 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
     try {
       debugPrint(
-        "--> Requesting hardware permissions and initializing media streams...",
+        "--> Requesting hardware permissions and initializing combined media streams...",
       );
 
+      // Captures both camera and microphone safely in ONE single hardware request
       _localStream = await navigator.mediaDevices.getUserMedia({
         'audio': {'echoCancellation': true, 'noiseSuppression': true},
         'video': {'width': 640, 'height': 480, 'facingMode': 'user'},
@@ -175,29 +176,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         debugPrint(
           "--> Audio and Video hardware tracks successfully mapped in a single pass.",
         );
-      }
-
-      await Future.delayed(const Duration(milliseconds: 250));
-
-      if (mounted && VideoCallScreen.isActive) {
-        try {
-          MediaStream audioStream = await navigator.mediaDevices.getUserMedia({
-            'audio': {'echoCancellation': true, 'noiseSuppression': true},
-            'video': false,
-          });
-
-          if (audioStream.getAudioTracks().isNotEmpty && _localStream != null) {
-            final audioTrack = audioStream.getAudioTracks().first;
-            await _localStream?.addTrack(audioTrack);
-            debugPrint(
-              "--> Audio hardware track successfully mapped into stream pool.",
-            );
-          }
-        } catch (audioError) {
-          debugPrint(
-            "Bypassed non-fatal Audio initialization variance: $audioError",
-          );
-        }
       }
     } catch (e) {
       _isHardwareReady = false; // Reset only on a genuine failure
