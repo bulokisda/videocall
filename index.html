@@ -19,11 +19,13 @@
 <body>
     <!--h2>Bisnan Calling</h2-->    
     <!--br-->
-    <button id="mediaToggleBtn" onclick="toggleLocalMedia()">Start Camera & Join Room</button>
+    <button id="mediaToggleBtn" onclick="toggleLocalMedia()" style="display: flex;
+      align-items: center; justify-content: center;">Start Camera & Join Room</button>
+    <br>
     
     <!--h4>Local Video</h4-->
     <div style="width: 100px; height: 100px; background: #000; border-radius: 8px; overflow: hidden; display: flex;
-      align-items: center;">
+      align-items: center; justify-content: center;">
         <video id="localVideo" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video>
     </div>
     <br>
@@ -33,7 +35,8 @@
     <!--h4>Others</h4-->
     <div id="videoGrid"></div>
 
-    <div>Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
+    <div style="display: flex;
+      align-items: center; justify-content: center;">Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
 
     <script>
         const rtcConfig = { 
