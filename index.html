@@ -81,7 +81,7 @@
                     }));
                 } else if (!isMediaActive) {
                     // Fix: Update the text when loading the page for the first time
-                    idDisplay.innerText = "Start Camera to Join Room";
+                    idDisplay.innerText = "Start Camera";
                     idDisplay.style.color = "#ff9800"; // Orange text showing it is ready but waiting for media
                 }
             };
@@ -169,10 +169,10 @@
                 myId = null; 
                 
                 if (isMediaActive) {
-                    document.getElementById('myIdDisplay').innerText = "Reconnecting Signal Server...";
+                    document.getElementById('myIdDisplay').innerText = "Reconnecting...";
                     document.getElementById('myIdDisplay').style.color = "#ff9800";
                 } else {
-                    document.getElementById('myIdDisplay').innerText = "Disconnected from Signal Server";
+                    document.getElementById('myIdDisplay').innerText = "Disconnected";
                     document.getElementById('myIdDisplay').style.color = "#f44336";
                 }
 
@@ -201,7 +201,7 @@
                     document.getElementById('localVideo').srcObject = localStream;
                     
                     isMediaActive = true;
-                    btn.innerText = "Stop Camera & Leave Room";
+                    btn.innerText = "Stop Camera";
                     btn.className = "privacy-btn active";
                     document.getElementById('myIdDisplay').innerText = "Registering...";
                     
@@ -223,13 +223,13 @@
                 cleanupAllConnections();
                 
                 isMediaActive = false;
-                btn.innerText = "Start Camera & Join Room";
+                btn.innerText = "Start Camera";
                 btn.className = "privacy-btn";
                 
                 myId = null; 
                 document.getElementById('myIdDisplay').innerText = "Offline (Privacy Mode)";
                 document.getElementById('myIdDisplay').style.color = "#ff9800";
-                document.getElementById('peerListContainer').innerText = "Join the room to view active peers.";
+                document.getElementById('peerListContainer').innerText = "";
             }
         }
 
@@ -318,7 +318,7 @@
                     container.appendChild(row);
                 }
             });
-            if(count === 0) container.innerText = "No other peers online.";
+            if(count === 0) container.innerText = "Nobody online.";
         }
 
         function togglePeerButton(peerId, isConnected) {
