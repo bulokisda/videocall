@@ -25,7 +25,7 @@
     <br> 
     <div id="peerListContainer" style="display: flex; align-items: center; justify-content: center;"> </div> 
     <div id="videoGrid" style="display: flex; align-items: center; justify-content: center;"></div> 
-    <div style="display: flex; align-items: center; justify-content: center;">Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
+    <div style="display: flex; align-items: center; justify-content: center;"><span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
 
     <script>
         const rtcConfig = { 
@@ -81,7 +81,7 @@
                     }));
                 } else if (!isMediaActive) {
                     // Fix: Update the text when loading the page for the first time
-                    idDisplay.innerText = "Start Camera";
+                    idDisplay.innerText = "";
                     idDisplay.style.color = "#ff9800"; // Orange text showing it is ready but waiting for media
                 }
             };
