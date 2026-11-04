@@ -17,21 +17,23 @@
     </style>
 </head>
 <body>
-    <h2>Bisnan Calling</h2>
-    <div>Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
-    <br>
+    <!--h2>Bisnan Calling</h2-->    
+    <!--br-->
     <button id="mediaToggleBtn" onclick="toggleLocalMedia()">Start Camera & Join Room</button>
     
-    <h4>Local Video</h4>
-    <div style="width: 100px; height: 100px; background: #000; border-radius: 8px; overflow: hidden;">
+    <!--h4>Local Video</h4-->
+    <div style="width: 100px; height: 100px; background: #000; border-radius: 8px; overflow: hidden; display: flex;
+      align-items: center;">
         <video id="localVideo" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video>
     </div>
-
-    <h4>Who is online:</h4>
+    <br>
+    <!--h4>Who is online:</h4-->
     <div id="peerListContainer">Join the room to see others.</div>
 
-    <h4>Others</h4>
+    <!--h4>Others</h4-->
     <div id="videoGrid"></div>
+
+    <div>Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
 
     <script>
         const rtcConfig = { 
