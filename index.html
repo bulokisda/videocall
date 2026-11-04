@@ -20,7 +20,7 @@
     <!--h2>Bisnan Calling</h2-->    
     <!--br-->
     <button id="mediaToggleBtn" onclick="toggleLocalMedia()" style="display: flex;
-      align-items: center; justify-content: center;">Ready</button>
+      align-items: center; justify-content: center;">Start Camera</button>
     <br>
     
     <!--h4>Local Video</h4-->
@@ -30,13 +30,15 @@
     </div>
     <br>
     <!--h4>Who is online:</h4-->
-    <div id="peerListContainer">Join the room to see others.</div>
+    <div id="peerListContainer" style="display: flex;
+      align-items: center; justify-content: center;"> </div>
 
     <!--h4>Others</h4-->
-    <div id="videoGrid"></div>
+    <div id="videoGrid" style="display: flex;
+      align-items: center; justify-content: center;"></div>
 
     <div style="display: flex;
-      align-items: center; justify-content: center;">Status: <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
+      align-items: center; justify-content: center;">Status:   <span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
 
     <script>
         const rtcConfig = { 
