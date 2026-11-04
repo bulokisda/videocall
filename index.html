@@ -35,28 +35,32 @@
 
     <script>
         const rtcConfig = { 
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }, 
-                { urls: 'stun:stun1.l.google.com:19302' },
-                // Metered.ca Open Relay Fallback Cluster
-                {
-                    urls: 'turn:openrelay.metered.ca:80',
-                    username: 'openrelayproject',
-                    credential: 'openrelayprojectsecret'
-                },
-                {
-                    urls: 'turn:openrelay.metered.ca:443',
-                    username: 'openrelayproject',
-                    credential: 'openrelayprojectsecret'
-                },
-                {
-                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-                    username: 'openrelayproject',
-                    credential: 'openrelayprojectsecret'
-                }
-            ] 
+          iceServers: [
+              {
+                urls: "stun:stun.relay.metered.ca:80",
+              },
+              {
+                urls: "turn:standard.relay.metered.ca:80",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um",
+              },
+              {
+                urls: "turn:standard.relay.metered.ca:80?transport=tcp",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um",
+              },
+              {
+                urls: "turn:standard.relay.metered.ca:443",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um",
+              },
+              {
+                urls: "turns:standard.relay.metered.ca:443?transport=tcp",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um",
+              },
+          ],
         };
-
 
         let ws = null;
         let localStream = null;
