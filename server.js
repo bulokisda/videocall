@@ -50,23 +50,30 @@ wss.on('connection', (ws) => {
 
             switch (data.type) {
                 case 'register-tablet':
+                    // Clean out any old registrations using this exact socket first
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
                     });
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
                     
-                    // 2. DYNAMICALY CAPTURE NAME: Saves whatever name the app sends ("Lito", "Kitchen", etc.)
+                    // FIXED: Dynamic Name Persistence. 
+                    // 1. Checks if this device already has an active name registered in our map memory.
+                    // 2. If it does, keep it! If it doesn't, grab data.name from the payload (or default to null).
+                    const existingRecord = clients.get(clientId);
+                    const dynamicPersistedName = (data.name) || (existingRecord ? existingRecord.name : null);
+
                     clients.set(clientId, { 
                         socket: ws, 
                         type: 'tablet',
-                        name: data.name // Saves the exact name dynamically! No hardcoded fallbacks here.
+                        name: dynamicPersistedName // Safely locked into server memory across hot disconnect passes
                     });
                     
-                    console.log(`Android Node Registered: ${clientId} - Name: ${data.name || 'None'}`);
+                    console.log(`Android Node Registered: ${clientId} - Name: ${dynamicPersistedName || 'None'}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
+
             
                 case 'register-browser':
                     clients.forEach((info, id) => {
