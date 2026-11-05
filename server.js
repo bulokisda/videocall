@@ -48,20 +48,34 @@ wss.on('connection', (ws) => {
 
             switch (data.type) {
                 case 'register-tablet':
-                    // Clean out any old registrations using this exact socket first
+                    // FIXED: Dynamic Name Retention (0% Hardcoding)
+                    // 1. Before clearing old mappings, look up if this socket already has a custom name saved.
+                    // 2. If it does, protect and retain it! If it doesn't, grab data.name from the payload.
+                    let existingDeviceName = data.name || null;
+                    
+                    clients.forEach((info, id) => {
+                        if (info.socket === ws && info.name) {
+                            existingDeviceName = info.name;
+                        }
+                    });
+
+                    // Clean out old registrations using this exact socket first
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
                     });
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
                     
+                    // Final configuration fallback: Prioritize new data payload, preserve old state if empty
+                    const dynamicPersistedName = data.name || existingDeviceName;
+
                     clients.set(clientId, { 
                         socket: ws, 
                         type: 'tablet',
-                        name: data.name // Strictly rely on what the tablet sends!
+                        name: dynamicPersistedName // Securely locked in across rapid hangups and network drops
                     });
                     
-                    console.log(`Android Node Registered: ${clientId} - Name: ${data.name || 'None'}`);
+                    console.log(`Android Node Registered: ${clientId} - Name: ${dynamicPersistedName || 'None'}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
