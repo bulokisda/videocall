@@ -5,12 +5,19 @@ const clients = new Map();
 console.log("Manual Mesh Signaling Engine active on port 8080...");
 
 function broadcastPeerList() {
-    // 1. COMPLETELY DYNAMIC MAP (No Hardcoded Strings):
-    const peerList = Array.from(clients.entries()).map(([id, info]) => ({
-        id: id,
-        type: info.type,
-        name: info.name || `${info.type.toUpperCase()} (${id.substring(0, 5)})` // Completely dynamic fallback name setup
-    }));
+    // 1. COMPLETELY DYNAMIC MAP (No Hardcoded Device Names)
+    const peerList = Array.from(clients.entries()).map(([id, info]) => {
+        // Safe ID tail splitting (e.g., extracts "zn40n" from "tablet_zn40n")
+        const idParts = id.split('_');
+        const shortId = idParts.length > 1 ? idParts[1] : id.substring(0, 5);
+        
+        return {
+            id: id,
+            type: info.type,
+            // FIXED: Fallback name now evaluates to "Tablet (zn40n)" instead of "TABLET (table)"
+            name: info.name || `${info.type.charAt(0).toUpperCase() + info.type.slice(1)} (${shortId})`
+        };
+    });
     
     clients.forEach((info) => {
         if (info.socket.readyState === WebSocket.OPEN) {
@@ -21,6 +28,7 @@ function broadcastPeerList() {
         }
     });
 }
+
 
 // PERIODIC CLEANUP INTERVAL (Pings clients every 5 seconds to wipe dead tabs instantly)
 setInterval(() => {
