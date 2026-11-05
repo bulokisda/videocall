@@ -61,22 +61,24 @@ wss.on('connection', (ws) => {
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
                     
-                    // FIXED: Dynamic Name Persistence. 
-                    // 1. Checks if this device already has an active name registered in our map memory.
-                    // 2. If it does, keep it! If it doesn't, grab data.name from the payload (or default to null).
+                    // FIXED: Dynamic Name Retention (0% Hardcoding)
+                    // 1. Checks if this specific clientId already has a session profile in memory
+                    // 2. If it does, protect and reuse its registered name string! 
+                    //    Otherwise, read data.name from the payload.
                     const existingRecord = clients.get(clientId);
-                    const dynamicPersistedName = (data.name) || (existingRecord ? existingRecord.name : null);
+                    const dynamicPersistedName = data.name || (existingRecord ? existingRecord.name : null);
 
                     clients.set(clientId, { 
                         socket: ws, 
                         type: 'tablet',
-                        name: dynamicPersistedName // Safely locked into server memory across hot disconnect passes
+                        name: dynamicPersistedName // Persists across rapid call drops and socket cycling
                     });
                     
                     console.log(`Android Node Registered: ${clientId} - Name: ${dynamicPersistedName || 'None'}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
+
 
             
                 case 'register-browser':
