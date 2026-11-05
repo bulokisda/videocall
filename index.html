@@ -311,10 +311,15 @@
                     const btnClass = isConnected ? "hangup-btn" : "";
                     const clickAction = isConnected ? `handleManualHangup('${peer.id}')` : `initiateOutboundCall('${peer.id}')`;
 
-                    const dynamicDisplayName = peer.name || peer.id;
+                    // 100% DYNAMIC STRING GUARD (No Hardcoding):
+                    // Prioritizes the true custom name payload. If missing, it creates a clean system display string.
+                    const dynamicDisplayName = peer.name || (peer.type.charAt(0).toUpperCase() + peer.type.slice(1) + " Node");
 
                     row.innerHTML = `
-                        <span><strong>${dynamicDisplayName}</strong> (${peer.type})</span>
+                        <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                            <span style="font-size: 16px; font-weight: bold; color: #ff9800;">${dynamicDisplayName}</span>
+                            <span style="font-size: 11px; color: #aaa;">Device Profile: ${peer.type.toUpperCase()} | ID: ${peer.id}</span>
+                        </div>
                         <button id="btn_${peer.id}" class="${btnClass}" onclick="${clickAction}">${btnText}</button>
                     `;
                     container.appendChild(row);
@@ -322,6 +327,7 @@
             });
             if(count === 0) container.innerText = "Nobody online.";
         }
+
 
         function togglePeerButton(peerId, isConnected) {
             const btn = document.getElementById(`btn_${peerId}`);
