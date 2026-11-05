@@ -5,9 +5,11 @@ const clients = new Map();
 console.log("Manual Mesh Signaling Engine active on port 8080...");
 
 function broadcastPeerList() {
+    // FIXED: Maps the 'name' field out of the clients collection into the broadcast packet
     const peerList = Array.from(clients.entries()).map(([id, info]) => ({
         id: id,
-        type: info.type
+        type: info.type,
+        name: info.name || (info.type === 'browser' ? 'Browser Node' : 'Lito') 
     }));
     
     clients.forEach((info) => {
@@ -46,8 +48,15 @@ wss.on('connection', (ws) => {
                     });
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
-                    clients.set(clientId, { socket: ws, type: 'tablet' });
-                    console.log(`Android 10 Node Registered: ${clientId}`);
+                    
+                    // FIXED: Captures data.name passed by the tablet application registry signal
+                    clients.set(clientId, { 
+                        socket: ws, 
+                        type: 'tablet', 
+                        name: data.name || 'Lito' 
+                    });
+                    
+                    console.log(`Android 10 Node Registered: ${clientId} (${data.name || 'Lito'})`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
@@ -58,25 +67,36 @@ wss.on('connection', (ws) => {
                         if (info.socket === ws) clients.delete(id);
                     });
                 
-                    // FIXED: If an ID was explicitly passed, purge any stale socket mapping tied to it first
                     if (data.id && clients.has(data.id)) {
                         console.log(`Purging stale socket reference for existing node session: ${data.id}`);
                         clients.delete(data.id);
                     }
                 
                     clientId = data.id || 'browser_' + Math.random().toString(36).substr(2, 5);
-                    clients.set(clientId, { socket: ws, type: 'browser' });
+                    
+                    // FIXED: Captures data.name if the browser specifies one (defaults to Browser)
+                    clients.set(clientId, { 
+                        socket: ws, 
+                        type: 'browser', 
+                        name: data.name || 'Browser' 
+                    });
+                    
                     console.log(`Web Browser Node Registered: ${clientId}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
-
 
                 case 'offer':
                 case 'answer':
                 case 'ice-candidate':
                 case 'call-decline':
                     data.senderId = clientId;
+                    // FIXED: Attaches the registered name to outbound call routing vectors
+                    const currentClient = clients.get(clientId);
+                    if (currentClient) {
+                        data.senderName = currentClient.name;
+                    }
+                    
                     const targetId = data.targetId;
                     if (!targetId) break;
 
@@ -88,25 +108,22 @@ wss.on('connection', (ws) => {
 
                 case 'hangup':
                     if (data.targetId) {
-                        // Targeted point-to-point drop
                         const target = clients.get(data.targetId);
                         if (target && target.socket.readyState === WebSocket.OPEN) {
                             target.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
                         }
                     } else {
-                        // Broad Room Teardown Notification (Client clicked Leave Room)
                         console.log(`Node explicitly requested global room teardown: ${clientId}`);
-                        clients.delete(clientId); // Clean them out of registry memory instantly
+                        clients.delete(clientId);
                         
                         clients.forEach((info) => {
                             if (info.socket.readyState === WebSocket.OPEN) {
                                 info.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
                             }
                         });
-                        broadcastPeerList(); // Instantly update peer list across surviving nodes
+                        broadcastPeerList();
                     }
                     break;
-
             }
         } catch (e) {
             console.error("Signaling error:", e);
@@ -118,7 +135,6 @@ wss.on('connection', (ws) => {
             console.log(`Connection dropped by client layout layer: ${clientId}`);
             clients.delete(clientId);
             
-            // Notify surviving nodes to instantly drop video feeds for this ID
             clients.forEach((info) => {
                 if (info.socket.readyState === WebSocket.OPEN) {
                     info.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
