@@ -27,6 +27,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   bool _isHandshakeComplete = false;
   bool _hasStartedBootstrap = false;
   String? _myNodeId;
+  String? _myIdFromArgs;
 
   // final Map<String, dynamic> _rtcConfig = {
   //   'iceServers': [
@@ -51,27 +52,29 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   final Map<String, dynamic> _rtcConfig = {
     'iceServers': [
-      {'urls': ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']},
+      {'urls': "stun:stun.relay.metered.ca:80"},
       {
-        'urls': ['turn:openrelay.metered.ca:80'],
-        'username': 'openrelayproject',
-        'credential': 'openrelayprojectsecret',
+        'urls': "turn:standard.relay.metered.ca:80",
+        'username': "801acfb381f1738ba4e9e792",
+        'credential': "xb8Y+/nANmaFf1Um",
       },
       {
-        'urls': ['turn:openrelay.metered.ca:443'],
-        'username': 'openrelayproject',
-        'credential': 'openrelayprojectsecret',
+        'urls': "turn:standard.relay.metered.ca:80?transport=tcp",
+        'username': "801acfb381f1738ba4e9e792",
+        'credential': "xb8Y+/nANmaFf1Um",
       },
       {
-        'urls': ['turn:openrelay.metered.ca:443?transport=tcp'],
-        'username': 'openrelayproject',
-        'credential': 'openrelayprojectsecret',
-      }
+        'urls': "turn:standard.relay.metered.ca:443",
+        'username': "801acfb381f1738ba4e9e792",
+        'credential': "xb8Y+/nANmaFf1Um",
+      },
+      {
+        'urls': "turns:standard.relay.metered.ca:443?transport=tcp",
+        'username': "801acfb381f1738ba4e9e792",
+        'credential': "xb8Y+/nANmaFf1Um",
+      },
     ],
-    'sdpSemantics': 'unified-plan',
   };
-
-
 
   @override
   void initState() {
@@ -85,7 +88,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         _hasStartedBootstrap = true;
 
         // Safely extract the arguments from the modal context inside post-frame layout bounds
-        final remoteSdpArgs = ModalRoute.of(context)?.settings.arguments;
+        final remoteSdpArgs =
+            ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+
+        if (remoteSdpArgs != null) {
+          // FIXED: Map the dynamic argument variable securely to your class instance property scope
+          _myIdFromArgs = remoteSdpArgs['myRegisteredId'];
+        }
+
         _bootstrapWebRTC(remoteSdpArgs);
       }
     });
@@ -147,18 +157,30 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       // 4. Save locally to start generating our ICE candidates
       await pc.setLocalDescription(offer);
 
-      // 5. Send it to the background isolate to deliver to the browser node
+      // FIXED: Allow WebRTC a brief window to gather local connection candidates
+      // into the SDP profile string before broadcasting it to the network hub.
+      int checks = 0;
+      while (pc.iceGatheringState !=
+              RTCIceGatheringState.RTCIceGatheringStateComplete &&
+          checks < 20) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        checks++;
+      }
+
+      // Fetch the updated local description containing bundled network routes
+      final stableOffer = await pc.getLocalDescription();
+
+      // 5. Send it to the background isolate to deliver to the target peer node
       FlutterBackgroundService().invoke('sendSignal', {
         'payload': json.encode({
           'type': 'offer',
           'targetId': targetPeerId,
-          'sdp': offer.sdp,
+          'senderId': _myIdFromArgs ?? 'unknown tablet', // Use the registered ID from args if available
+          'senderName': 'Lito', // Properly configured custom identity anchor
+          'sdp':
+              stableOffer?.sdp ?? offer.sdp, // Fallback if gathering timed out
         }),
       });
-
-      // Note: The browser will process this offer, generate an 'answer',
-      // and send it back. Your existing '_handleIncomingMeshAnswer'
-      // method will automatically handle the incoming answer payload when it arrives!
     } catch (e) {
       debugPrint("Failed to create outgoing call session: $e");
       _closeAllCallsAndExit();

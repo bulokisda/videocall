@@ -76,7 +76,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Visual Call',
+      debugShowCheckedModeBanner: false,
+      title: 'Bisnan Calling',
       theme: ThemeData(brightness: Brightness.dark),
       initialRoute: '/',
       routes: {
@@ -100,6 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _serviceSubscription;
   // bool _isNavigatingToCall = false;
   List<dynamic> _discoveredNetworkPeers = [];
+  String? _myRegisteredId;
+  bool _isProcessingNavigationLock = false; // Add this class variable
 
   @override
   void initState() {
@@ -114,54 +117,102 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // main.dart -> Inside _HomeScreenState class
-  bool _isProcessingNavigationLock = false; // Add this class variable
-
   void _bindCommunicationChannel() {
-    _serviceSubscription = FlutterBackgroundService()
-        .on('onSignalReceived')
-        .listen((event) {
-          if (event == null || event['data'] == null) return;
+    _serviceSubscription = FlutterBackgroundService().on('onSignalReceived').listen((
+      event,
+    ) {
+      if (event == null || event['data'] == null) return;
 
-          var data = jsonDecode(event['data']);
+      var data = jsonDecode(event['data']);
 
-          if (!_isOnline) {
-            setState(() => _isOnline = true);
-          }
+      // Ensure the online connection indicator switches to active
+      if (!_isOnline) {
+        setState(() => _isOnline = true);
+      }
 
-          if (data['type'] == 'accept-from-notification') {
-            // FIXED: Strict structural guard checking the active window status and tracking loop
-            if (mounted &&
-                !VideoCallScreen.isActive &&
-                !_isProcessingNavigationLock) {
-              _isProcessingNavigationLock =
-                  true; // Lock execution track instantly
+      if (data['type'] == 'registered') {
+        if (mounted) {
+          setState(() {
+            _myRegisteredId = data['id'];
+          });
+          debugPrint(
+            "--> UI Isolate successfully captured its own ID: $_myRegisteredId",
+          );
+        }
+      }
 
-              final sdpPayload = data['sdp'];
-              final senderIdPayload = data['senderId'] ?? 'browser_node';
+      if (data['type'] == 'offer') {
+        if (mounted) {
+          setState(() {
+            // Capture the incoming browser call parameters right in the UI state
+            _remoteSdpOffer = data;
+          });
+          debugPrint(
+            "--> UI Isolate caught an incoming offer from: ${data['senderId']}",
+          );
+        }
+      }
 
-              setState(() {
-                _remoteSdpOffer = null;
-              });
+      if (data['type'] == 'hangup') {
+        if (mounted) {
+          setState(() {
+            _remoteSdpOffer =
+                null; // Clear the answer button if the browser hangs up
+          });
+        }
+      }
 
-              Navigator.pushNamed(
-                context,
-                '/call',
-                arguments: {'sdp': sdpPayload, 'senderId': senderIdPayload},
-              ).then((_) {
-                // Reset navigation lock when returning back to HomeScreen
-                _isProcessingNavigationLock = false;
-              });
+      if (data['type'] == 'accept-from-notification') {
+        if (mounted &&
+            !VideoCallScreen.isActive &&
+            !_isProcessingNavigationLock) {
+          _isProcessingNavigationLock = true;
+          final sdpPayload = data['sdp'];
+          final senderIdPayload = data['senderId'] ?? 'browser_node';
+
+          setState(() {
+            _remoteSdpOffer = null;
+          });
+
+          Navigator.pushNamed(
+            context,
+            '/call',
+            arguments: {
+              'sdp': sdpPayload,
+              'senderId': senderIdPayload,
+              'myRegisteredId': _myRegisteredId,
+            },
+          ).then((_) {
+            _isProcessingNavigationLock = false;
+          });
+        }
+      }
+
+      if (data['type'] == 'mesh-peer-list') {
+        if (mounted) {
+          // FIXED: Dynamically discover our own current tablet ID from the list itself!
+          // Looks for the peer marked as 'tablet' (or our name 'Lito')
+          final mySelfNode = (data['peers'] as List? ?? []).firstWhere(
+            (peer) => peer['type'] == 'tablet',
+            orElse: () => null,
+          );
+
+          setState(() {
+            _discoveredNetworkPeers = data['peers'] ?? [];
+            if (mySelfNode != null) {
+              _myRegisteredId =
+                  mySelfNode['id']; // Auto-heals stale ID states instantly!
+              debugPrint(
+                "--> Dynamically synced current Tablet ID: $_myRegisteredId",
+              );
             }
-          }
-          if (data['type'] == 'mesh-peer-list') {
-            if (mounted) {
-              setState(() {
-                _discoveredNetworkPeers = data['peers'] ?? [];
-              });
-            }
-          }
-        });
+          });
+          debugPrint(
+            "--> UI Rebuilt! Found ${_discoveredNetworkPeers.length} total raw nodes.",
+          );
+        }
+      }
+    });
   }
 
   @override
@@ -172,69 +223,83 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Filters out your own tablet ID, leaving only the browser nodes visible
+    final activeCallTargets = _discoveredNetworkPeers.where((peer) {
+      if (_myRegisteredId != null) {
+        return peer['id'] != _myRegisteredId;
+      }
+      return true;
+    }).toList();
+
     return Scaffold(
+      appBar: AppBar(title: const Text("Bisnan Calling"), centerTitle: true),
       body: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            Icon(
-              Icons.circle,
-              color: _isOnline ? Colors.green : Colors.red,
-              size: 24,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _isOnline
-                  ? "Signaling Engine Connected"
-                  : "Connecting to Engine...",
-            ),
+            Text(_isOnline ? "😊" : "🚫", style: const TextStyle(fontSize: 60)),
+
+            // FIXED: If the browser is actively calling the tablet, show the Answer Button!
             if (_remoteSdpOffer != null) ...[
-              const SizedBox(height: 20),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                onPressed: () {
-                  FlutterBackgroundService().invoke("notificationAction", {
-                    "action": "accept",
-                  });
-                },
-                child: const Text("Answer Call from UI"),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    minimumSize: const Size(250, 60),
+                  ),
+                  onPressed: () {
+                    // Triggers the accept logic cleanly via the service layer
+                    FlutterBackgroundService().invoke("notificationAction", {
+                      "action": "accept",
+                    });
+                  },
+                  child: Text(
+                    "Answer Call from ${_remoteSdpOffer['senderName'] ?? 'Browser'}",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ),
             ],
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-              onPressed: () {
-                // Find the first peer whose type profile equals 'browser'
-                final browserNode = _discoveredNetworkPeers.firstWhere(
-                  (peer) => peer['type'] == 'browser',
-                  orElse: () => null,
-                );
 
-                if (browserNode != null && browserNode['id'] != null) {
-                  String actualBrowserRuntimeId = browserNode['id'];
-                  debugPrint(
-                    "--> Routing outbound offer cleanly to actual target ID: $actualBrowserRuntimeId",
-                  );
+            // Active list showing the connected browser client
+            Expanded(
+              child: activeCallTargets.isEmpty
+                  ? const Center(child: Text("Nobody online yet."))
+                  : ListView.builder(
+                      itemCount: activeCallTargets.length,
+                      itemBuilder: (context, index) {
+                        final peer = activeCallTargets[index];
+                        final String peerId = peer['id'] ?? 'Unknown';
+                        final String deviceType = peer['type'] ?? 'device';
 
-                  Navigator.pushNamed(
-                    context,
-                    '/call',
-                    arguments: {
-                      'isCaller': true,
-                      'targetId': actualBrowserRuntimeId, // Pass the dynamic real ID here!
-                    },
-                  );
-                } else {
-                  // Show an error toast or snackbar if no browser is connected to the server yet
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        "Cannot initiate call: No active browser peer discovered online yet.",
-                      ),
+                        return ListTile(
+                          leading: const Icon(
+                            Icons.computer,
+                            color: Colors.blue,
+                          ),
+                          title: Text("Browser Client ($peerId)"),
+                          subtitle: Text("Status: ${deviceType.toUpperCase()}"),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.phone, color: Colors.green),
+                            onPressed: () {
+                              Navigator.pushNamed(
+                                context,
+                                '/call',
+                                arguments: {
+                                  'isCaller': true,
+                                  'targetId': peerId,
+                                  'myRegisteredId': _myRegisteredId,
+                                },
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
-                  );
-                }
-              },
-              child: const Text("Call Browser"),
             ),
           ],
         ),

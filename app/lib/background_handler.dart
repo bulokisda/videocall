@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -11,6 +11,9 @@ const String signalingServerUrl = "wss://family-video-signaler.onrender.com";
 Map<String, dynamic>? currentOffer;
 String? registeredId;
 List<String> pendingWebRtcSignalsQueue = [];
+// FIXED: Cache the accepted call payload to survive app launch boot cycles
+Map<String, dynamic>? acceptedCallPayload;
+String? cachedPeerListMessage;
 
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
@@ -32,14 +35,35 @@ Future<void> initializeBackgroundService() async {
 
 @pragma('vm:entry-point')
 void notificationTapBackgroundHandler(NotificationResponse response) {
-  // FIXED: Leave this completely empty!
-  // The foreground initialization loop in main.dart handles this cleanly.
+  final backgroundService = FlutterBackgroundService();
+
+  if (response.actionId == 'decline_call') {
+    backgroundService.invoke('notificationAction', {'action': 'decline'});
+  } else if (response.actionId == 'accept_call') {
+    backgroundService.invoke('notificationAction', {'action': 'accept'});
+  }
 }
 
 @pragma('vm:entry-point')
 void onStartBackgroundEngine(ServiceInstance service) {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  flutterLocalNotificationsPlugin.initialize(
+    const InitializationSettings(android: initializationSettingsAndroid),
+    onDidReceiveNotificationResponse: (response) {
+      if (response.actionId == 'decline_call') {
+        service.invoke('notificationAction', {'action': 'decline'});
+      } else if (response.actionId == 'accept_call') {
+        service.invoke('notificationAction', {'action': 'accept'});
+      }
+    },
+    onDidReceiveBackgroundNotificationResponse:
+        notificationTapBackgroundHandler,
+  );
 
   WebSocketChannel? backgroundSocket;
   Timer? backgroundHeartbeat;
@@ -51,9 +75,12 @@ void onStartBackgroundEngine(ServiceInstance service) {
         Uri.parse(signalingServerUrl),
       );
 
-      // FIXED: If the background service already has a registeredId, pass it to preserve the session!
       backgroundSocket!.sink.add(
-        json.encode({'type': 'register-tablet', 'id': registeredId}),
+        json.encode({
+          'type': 'register-tablet',
+          'id': registeredId,
+          'name': 'Lito', // <-- Pass the custom device name right here
+        }),
       );
 
       backgroundHeartbeat = Timer.periodic(const Duration(seconds: 20), (
@@ -73,15 +100,20 @@ void onStartBackgroundEngine(ServiceInstance service) {
             registeredId = data['id'];
           }
 
+          if (data['type'] == 'mesh-peer-list') {
+            cachedPeerListMessage = message; // Cache the exact JSON string
+          }
+
           if (data['type'] == 'offer') {
             currentOffer = data;
-            String displaySender = data['senderId'] ?? 'browser_node';
+            acceptedCallPayload = null; // Clear any old stale accepted pass
+            String displaySender = data['senderName'] ?? data['senderId'] ?? 'Someone';
             pendingWebRtcSignalsQueue.add(message);
 
             flutterLocalNotificationsPlugin.show(
               100,
-              'Incoming Visual Request',
-              'User ($displaySender) is calling...',
+              'Incoming Call',
+              '$displaySender is calling...',
               const NotificationDetails(
                 android: AndroidNotificationDetails(
                   'incoming_call_channel',
@@ -89,6 +121,7 @@ void onStartBackgroundEngine(ServiceInstance service) {
                   importance: Importance.max,
                   priority: Priority.high,
                   fullScreenIntent: true,
+                  color: Colors.green,
                   category: AndroidNotificationCategory.call,
                   ongoing: true,
                   actions: [
@@ -102,6 +135,7 @@ void onStartBackgroundEngine(ServiceInstance service) {
                       'decline_call',
                       'Decline',
                       cancelNotification: true,
+                      showsUserInterface: true,
                     ),
                   ],
                 ),
@@ -115,7 +149,9 @@ void onStartBackgroundEngine(ServiceInstance service) {
 
           if (data['type'] == 'hangup') {
             currentOffer = null;
+            acceptedCallPayload = null;
             pendingWebRtcSignalsQueue.clear();
+            flutterLocalNotificationsPlugin.cancel(100);
           }
 
           service.invoke("onSignalReceived", {"data": message});
@@ -136,18 +172,28 @@ void onStartBackgroundEngine(ServiceInstance service) {
 
   service.on('notificationAction').listen((event) {
     if (event == null) return;
+
     if (event['action'] == 'accept' && currentOffer != null) {
       pendingWebRtcSignalsQueue.clear();
+      flutterLocalNotificationsPlugin.cancel(100);
+
+      // FIXED: Build and cache the exact payload structure right here
+      acceptedCallPayload = {
+        'type': 'accept-from-notification',
+        'sdp': currentOffer!['sdp'],
+        'senderId': currentOffer!['senderId'] ?? 'browser_node',
+      };
+
       service.invoke("onSignalReceived", {
-        "data": json.encode({
-          'type': 'accept-from-notification',
-          'sdp': currentOffer!['sdp'],
-          'senderId': currentOffer!['senderId'] ?? 'browser_node',
-        }),
+        "data": json.encode(acceptedCallPayload),
       });
     } else if (event['action'] == 'decline') {
       pendingWebRtcSignalsQueue.clear();
       currentOffer = null;
+      acceptedCallPayload = null;
+
+      flutterLocalNotificationsPlugin.cancel(100);
+
       if (backgroundSocket != null) {
         backgroundSocket?.sink.add(json.encode({'type': 'hangup'}));
       }
@@ -157,16 +203,26 @@ void onStartBackgroundEngine(ServiceInstance service) {
     }
   });
 
-  // background_handler.dart -> Inside checkStatus listener block
   service.on('checkStatus').listen((event) {
     debugPrint("--> UI Isolate requested a clean queue flush.");
 
-    // Re-broadcast anything missed, then empty the cache instantly
+    // FIXED: If the app just opened because of an "Answer" tap, deliver it cleanly now!
+    if (acceptedCallPayload != null) {
+      service.invoke("onSignalReceived", {
+        "data": json.encode(acceptedCallPayload),
+      });
+      acceptedCallPayload = null; // Clear it out instantly once delivered
+    }
+
+    // FIXED: If we have an existing peer list, push it immediately to the newly opened UI
+    if (cachedPeerListMessage != null) {
+      service.invoke("onSignalReceived", {"data": cachedPeerListMessage});
+    }
+
     for (var queuedMessage in pendingWebRtcSignalsQueue) {
       service.invoke("onSignalReceived", {"data": queuedMessage});
     }
 
-    // FIXED: Clear it now so the data cannot fire into the next session boot pass
     pendingWebRtcSignalsQueue.clear();
 
     if (registeredId != null) {
