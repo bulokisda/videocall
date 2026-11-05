@@ -5,11 +5,11 @@ const clients = new Map();
 console.log("Manual Mesh Signaling Engine active on port 8080...");
 
 function broadcastPeerList() {
-    // FIXED: Maps the 'name' field out of the clients collection into the broadcast packet
+    // 1. COMPLETELY DYNAMIC MAP (No Hardcoded Strings):
     const peerList = Array.from(clients.entries()).map(([id, info]) => ({
         id: id,
         type: info.type,
-        name: info.name || (info.type === 'browser' ? 'Browser Node' : 'Lito') 
+        name: info.name || `${info.type.toUpperCase()} (${id.substring(0, 5)})` // Completely dynamic fallback name setup
     }));
     
     clients.forEach((info) => {
@@ -42,27 +42,25 @@ wss.on('connection', (ws) => {
 
             switch (data.type) {
                 case 'register-tablet':
-                    // Clean out any old registrations using this exact socket first
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
                     });
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
                     
-                    // FIXED: Captures data.name passed by the tablet application registry signal
+                    // 2. DYNAMICALY CAPTURE NAME: Saves whatever name the app sends ("Lito", "Kitchen", etc.)
                     clients.set(clientId, { 
                         socket: ws, 
-                        type: 'tablet', 
-                        name: data.name || 'Lito' 
+                        type: 'tablet',
+                        name: data.name // Saves the exact name dynamically! No hardcoded fallbacks here.
                     });
                     
-                    console.log(`Android 10 Node Registered: ${clientId} (${data.name || 'Lito'})`);
+                    console.log(`Android Node Registered: ${clientId} - Name: ${data.name || 'None'}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
             
                 case 'register-browser':
-                    // Clear out by matching socket wire reference
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
                     });
@@ -74,11 +72,11 @@ wss.on('connection', (ws) => {
                 
                     clientId = data.id || 'browser_' + Math.random().toString(36).substr(2, 5);
                     
-                    // FIXED: Captures data.name if the browser specifies one (defaults to Browser)
+                    // 3. DYNAMICALLY CAPTURE BROWSER NAME (If provided)
                     clients.set(clientId, { 
                         socket: ws, 
-                        type: 'browser', 
-                        name: data.name || 'Browser' 
+                        type: 'browser',
+                        name: data.name
                     });
                     
                     console.log(`Web Browser Node Registered: ${clientId}`);
@@ -91,12 +89,6 @@ wss.on('connection', (ws) => {
                 case 'ice-candidate':
                 case 'call-decline':
                     data.senderId = clientId;
-                    // FIXED: Attaches the registered name to outbound call routing vectors
-                    const currentClient = clients.get(clientId);
-                    if (currentClient) {
-                        data.senderName = currentClient.name;
-                    }
-                    
                     const targetId = data.targetId;
                     if (!targetId) break;
 
