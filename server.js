@@ -6,19 +6,14 @@ console.log("Manual Mesh Signaling Engine active on port 8080...");
 
 function broadcastPeerList() {
     const peerList = Array.from(clients.entries()).map(([id, info]) => {
-        const idParts = id.split('_');
-        const shortId = idParts.length > 1 ? idParts[1] : id.substring(0, 5);
-        
-        // DIAGNOSTIC CHECK: Let's see exactly what keys exist in the 'info' object
-        console.log(`[DIAGNOSTIC] Mapping ID: ${id} | info.name: "${info.name}" | Keys in info:`, Object.keys(info));
-        
-        // This fallback creates a detailed debugging label so we can see the exact state on the browser UI
-        const debugFallback = `MISSING_NAME_FALLBACK_(${shortId})`;
+        // Safe dynamic fallback name if info.name is missing (e.g. "Tablet (zn40n)" or "Browser (khzti)")
+        const fallbackId = id.includes('_') ? id.split('_')[1] : id.substring(0, 5);
+        const fallbackName = `${info.type.charAt(0).toUpperCase() + info.type.slice(1)} (${fallbackId})`;
 
         return {
             id: id,
             type: info.type,
-            name: info.name || debugFallback
+            name: info.name || fallbackName
         };
     });
     
@@ -31,7 +26,6 @@ function broadcastPeerList() {
         }
     });
 }
-
 
 
 // PERIODIC CLEANUP INTERVAL (Pings clients every 5 seconds to wipe dead tabs instantly)
@@ -61,24 +55,16 @@ wss.on('connection', (ws) => {
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
                     
-                    // FIXED: Dynamic Name Retention (0% Hardcoding)
-                    // 1. Checks if this specific clientId already has a session profile in memory
-                    // 2. If it does, protect and reuse its registered name string! 
-                    //    Otherwise, read data.name from the payload.
-                    const existingRecord = clients.get(clientId);
-                    const dynamicPersistedName = data.name || (existingRecord ? existingRecord.name : null);
-
                     clients.set(clientId, { 
                         socket: ws, 
                         type: 'tablet',
-                        name: dynamicPersistedName // Persists across rapid call drops and socket cycling
+                        name: data.name // Strictly rely on what the tablet sends!
                     });
                     
-                    console.log(`Android Node Registered: ${clientId} - Name: ${dynamicPersistedName || 'None'}`);
+                    console.log(`Android Node Registered: ${clientId} - Name: ${data.name || 'None'}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
-
 
             
                 case 'register-browser':
