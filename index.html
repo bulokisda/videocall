@@ -311,8 +311,10 @@
                     const btnClass = isConnected ? "hangup-btn" : "";
                     const clickAction = isConnected ? `handleManualHangup('${peer.id}')` : `initiateOutboundCall('${peer.id}')`;
 
+                    const dynamicDisplayName = peer.name || peer.id;
+
                     row.innerHTML = `
-                        <span>${peer.id} (${peer.type})</span>
+                        <span><strong>${dynamicDisplayName}</strong> (${peer.type})</span>
                         <button id="btn_${peer.id}" class="${btnClass}" onclick="${clickAction}">${btnText}</button>
                     `;
                     container.appendChild(row);
@@ -439,6 +441,7 @@
             
             togglePeerButton(peerId, false);
         }
+        
     </script>
 </body>
 </html>
