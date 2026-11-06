@@ -134,9 +134,9 @@ wss.on('connection', (ws) => {
                             if (info.socket.readyState === WebSocket.OPEN) {
                                 info.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
                             }
-                        });
-                        broadcastPeerList();
+                        });                        
                     }
+                    broadcastPeerList();
                     break;
             }
         } catch (e) {
