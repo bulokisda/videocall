@@ -35,14 +35,43 @@ Future<void> initializeBackgroundService() async {
 
 @pragma('vm:entry-point')
 void notificationTapBackgroundHandler(NotificationResponse response) {
-  final backgroundService = FlutterBackgroundService();
-
+  // Wakes up binary messenger channels for communication with Java/Kotlin layers
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // This will now print to 'flutter logs' because the Manifest allows the intent to route
+  print('--> RECEIVED FULL SCREEN INTENT BACKGROUND ACTION: ${response.actionId}');
+  
   if (response.actionId == 'decline_call') {
-    backgroundService.invoke('notificationAction', {'action': 'decline'});
+    final localizedPlugin = FlutterLocalNotificationsPlugin();
+    
+    // We immediately run these sequentially to ensure Android registers the tear down
+    localizedPlugin.show(
+      100,
+      'Call Declined',
+      '',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'incoming_call_channel',
+          'Incoming Video Calls',
+          importance: Importance.min,
+          priority: Priority.low,
+          ongoing: false, 
+        ),
+      ),
+    ).then((_) {
+      localizedPlugin.cancel(100);
+      print('--> Notification 100 successfully removed from tray.');
+    });
+
+    // Notify your persistent background isolate to transmit the websocket hangup packet
+    FlutterBackgroundService().invoke('notificationAction', {'action': 'decline'});
   } else if (response.actionId == 'accept_call') {
-    backgroundService.invoke('notificationAction', {'action': 'accept'});
+    FlutterBackgroundService().invoke('notificationAction', {'action': 'accept'});
   }
 }
+
+
+
 
 @pragma('vm:entry-point')
 void onStartBackgroundEngine(ServiceInstance service) {
@@ -78,15 +107,25 @@ void onStartBackgroundEngine(ServiceInstance service) {
       backgroundSocket!.sink.add(
         json.encode({
           'type': 'register-tablet',
-          'id': registeredId,
-          'name': 'Lito', // <-- Pass the custom device name right here
+          'id': (registeredId != null && registeredId!.isNotEmpty)
+              ? registeredId
+              : null,
+          'name': 'Lito', // Fixed compilation guarantee anchor token
         }),
       );
 
-      backgroundHeartbeat = Timer.periodic(const Duration(seconds: 20), (
+      backgroundHeartbeat = Timer.periodic(const Duration(seconds: 10), (
         timer,
       ) {
-        backgroundSocket?.sink.add(json.encode({'type': 'ping'}));
+        backgroundSocket?.sink.add(
+          json.encode({
+            'type': 'ping',
+            'id': (registeredId != null && registeredId!.isNotEmpty)
+                ? registeredId
+                : null,
+            'name': 'Lito',
+          }),
+        );
       });
 
       backgroundSocket!.stream.listen(
@@ -107,13 +146,14 @@ void onStartBackgroundEngine(ServiceInstance service) {
           if (data['type'] == 'offer') {
             currentOffer = data;
             acceptedCallPayload = null; // Clear any old stale accepted pass
-            String displaySender = data['senderName'] ?? data['senderId'] ?? 'Someone';
+            String displaySender =
+                data['senderName'] ?? data['senderId'] ?? 'Someone';
             pendingWebRtcSignalsQueue.add(message);
 
             flutterLocalNotificationsPlugin.show(
               100,
-              'Incoming Call',
-              '$displaySender is calling...',
+              'Incoming Call from $displaySender',
+              '',
               const NotificationDetails(
                 android: AndroidNotificationDetails(
                   'incoming_call_channel',
@@ -122,20 +162,23 @@ void onStartBackgroundEngine(ServiceInstance service) {
                   priority: Priority.high,
                   fullScreenIntent: true,
                   color: Colors.green,
+                  colorized: true,
                   category: AndroidNotificationCategory.call,
                   ongoing: true,
                   actions: [
                     AndroidNotificationAction(
                       'accept_call',
                       'Answer',
+                      icon: DrawableResourceAndroidBitmap('ic_accept_phone'),
                       cancelNotification: true,
                       showsUserInterface: true,
                     ),
                     AndroidNotificationAction(
                       'decline_call',
                       'Decline',
+                      icon: DrawableResourceAndroidBitmap('ic_decline_phone'),
                       cancelNotification: true,
-                      showsUserInterface: true,
+                      showsUserInterface: false,
                     ),
                   ],
                 ),
@@ -189,17 +232,28 @@ void onStartBackgroundEngine(ServiceInstance service) {
       });
     } else if (event['action'] == 'decline') {
       pendingWebRtcSignalsQueue.clear();
-      currentOffer = null;
       acceptedCallPayload = null;
-
       flutterLocalNotificationsPlugin.cancel(100);
 
       if (backgroundSocket != null) {
-        backgroundSocket?.sink.add(json.encode({'type': 'hangup'}));
+        backgroundSocket?.sink.add(
+          json.encode({
+            'type': 'hangup',
+            'targetId': currentOffer?['senderId'],
+            'senderId': currentOffer?['targetId'] ?? 'browser_node',
+            'name': 'Lito',
+          }),
+        );
       }
-      service.invoke("onSignalReceived", {
-        "data": json.encode({'type': 'hangup'}),
-      });
+      // service.invoke("onSignalReceived", {
+      //   "data": json.encode({
+      //     'type': 'hangup',
+      //     'targetId': currentOffer?['senderId'],
+      //     'senderId': currentOffer?['targetId'] ?? 'browser_node',
+      //     'name': 'Lito',
+      //   }),
+      // });
+      currentOffer = null;
     }
   });
 

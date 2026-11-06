@@ -175,7 +175,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         'payload': json.encode({
           'type': 'offer',
           'targetId': targetPeerId,
-          'senderId': _myIdFromArgs ?? 'unknown tablet', // Use the registered ID from args if available
+          'senderId':
+              _myIdFromArgs ??
+              'unknown tablet', // Use the registered ID from args if available
           'senderName': 'Lito', // Properly configured custom identity anchor
           'sdp':
               stableOffer?.sdp ?? offer.sdp, // Fallback if gathering timed out
@@ -537,7 +539,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       });
 
       FlutterBackgroundService().invoke('sendSignal', {
-        'payload': json.encode({'type': 'register-tablet'}),
+        'payload': json.encode({
+          'type': 'register-tablet',
+          'id': _myNodeId,
+          'name': 'Lito',
+        }),
       });
     } catch (e) {
       debugPrint("Error sending clean hangup signal: $e");

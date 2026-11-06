@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -47,6 +48,7 @@ void main() async {
   await flutterLocalNotificationsPlugin.initialize(
     const InitializationSettings(android: initializationSettingsAndroid),
     onDidReceiveNotificationResponse: (NotificationResponse response) {
+      print('--> NOTIFICATION RESPONSE: ${response.actionId}');
       if (response.actionId == 'accept_call') {
         FlutterBackgroundService().invoke("notificationAction", {
           "action": "accept",
@@ -55,6 +57,10 @@ void main() async {
         FlutterBackgroundService().invoke("notificationAction", {
           "action": "decline",
         });
+        flutterLocalNotificationsPlugin.cancel(100);
+
+        // 3. CRITICAL: Gracefully exit the application process to dismiss the UI window instantly
+        SystemNavigator.pop(); 
       } else {
         FlutterBackgroundService().invoke("checkStatus");
       }
@@ -97,7 +103,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = false;
-  dynamic _remoteSdpOffer;
+  // dynamic _remoteSdpOffer;
   StreamSubscription? _serviceSubscription;
   // bool _isNavigatingToCall = false;
   List<dynamic> _discoveredNetworkPeers = [];
@@ -141,26 +147,37 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
-      if (data['type'] == 'offer') {
-        if (mounted) {
-          setState(() {
-            // Capture the incoming browser call parameters right in the UI state
-            _remoteSdpOffer = data;
-          });
-          debugPrint(
-            "--> UI Isolate caught an incoming offer from: ${data['senderId']}",
-          );
-        }
-      }
+      // if (data['type'] == 'offer') {
+      //   if (mounted) {
+      //     setState(() {
+      //       // Capture the incoming browser call parameters right in the UI state
+      //       _remoteSdpOffer = data;
+      //     });
+      //     debugPrint(
+      //       "--> UI Isolate caught an incoming offer from: ${data['senderId']}",
+      //     );
+      //   }
+      // }
 
-      if (data['type'] == 'hangup') {
-        if (mounted) {
-          setState(() {
-            _remoteSdpOffer =
-                null; // Clear the answer button if the browser hangs up
-          });
-        }
-      }
+      // if (data['type'] == 'hangup') {
+      //   if (mounted) {
+      //     setState(() {
+      //       _remoteSdpOffer =
+      //           null; // Clear the answer button if the browser hangs up
+      //     });
+      //   }
+      // }
+      // Inside your main App UI socket listener:
+
+      // if (data['type'] == 'hangup') {
+      //   // If the UI is already open, close it.
+      //   // If it's closed/minimized, do NOT force open it.
+      //   if (AppLifecycleState.resumed ==
+      //       WidgetsBinding.instance.lifecycleState) {
+      //     // Only perform navigation back if the app is actively being looked at
+      //     Navigator.pop();
+      //   }
+      // }
 
       if (data['type'] == 'accept-from-notification') {
         if (mounted &&
@@ -170,9 +187,9 @@ class _HomeScreenState extends State<HomeScreen> {
           final sdpPayload = data['sdp'];
           final senderIdPayload = data['senderId'] ?? 'browser_node';
 
-          setState(() {
-            _remoteSdpOffer = null;
-          });
+          // setState(() {
+          //   _remoteSdpOffer = null;
+          // });
 
           Navigator.pushNamed(
             context,
@@ -232,75 +249,82 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Bisnan Calling"), centerTitle: true),
+      appBar: AppBar(title: const Text("Bisnan Video Call"), centerTitle: true),
       body: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisAlignment: MainAxisAlignment
+              .center, // Centers items vertically if they don't fill the screen
+          crossAxisAlignment:
+              CrossAxisAlignment.center, // Centers items horizontally
+          mainAxisSize: MainAxisSize.min, // Forces the Column to only take up as much space as its children need
           children: [
-            Text(_isOnline ? "😊" : "🚫", style: const TextStyle(fontSize: 60)),
-
-            // FIXED: If the browser is actively calling the tablet, show the Answer Button!
-            if (_remoteSdpOffer != null) ...[
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    minimumSize: const Size(250, 60),
-                  ),
-                  onPressed: () {
-                    // Triggers the accept logic cleanly via the service layer
-                    FlutterBackgroundService().invoke("notificationAction", {
-                      "action": "accept",
-                    });
-                  },
-                  child: Text(
-                    "Answer Call from ${_remoteSdpOffer['senderName'] ?? 'Browser'}",
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+            activeCallTargets.isEmpty
+                ? Center(
+                    child: Text(
+                      _isOnline ? "🥱" : "🚫",
+                      style: const TextStyle(fontSize: 60),
                     ),
-                  ),
-                ),
-              ),
-            ],
-
-            // Active list showing the connected browser client
-            Expanded(
-              child: activeCallTargets.isEmpty
-                  ? const Center(child: Text("Nobody online yet."))
-                  : ListView.builder(
+                  )
+                : Flexible(
+                    // Replaced Expanded with Flexible so it can shrink-wrap
+                    child: ListView.builder(
+                      shrinkWrap: true, // Tells the ListView to only take up the space of its items
+                      physics: const NeverScrollableScrollPhysics(), // Optional: prevents internal scrolling if you want it strictly fixed
                       itemCount: activeCallTargets.length,
                       itemBuilder: (context, index) {
                         final peer = activeCallTargets[index];
                         final String peerId = peer['id'] ?? 'Unknown';
-                        final String deviceType = peer['type'] ?? 'device';
+                        final String peerName = peer['name'] ?? 'Unknown';
 
-                        return ListTile(
-                          leading: const Icon(
-                            Icons.computer,
-                            color: Colors.blue,
-                          ),
-                          title: Text("Browser Client ($peerId)"),
-                          subtitle: Text("Status: ${deviceType.toUpperCase()}"),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.phone, color: Colors.green),
-                            onPressed: () {
-                              Navigator.pushNamed(
-                                context,
-                                '/call',
-                                arguments: {
-                                  'isCaller': true,
-                                  'targetId': peerId,
-                                  'myRegisteredId': _myRegisteredId,
-                                },
-                              );
-                            },
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Row(
+                            children: [
+                              // Left Half: Name aligned to the right edge of its container
+                              Expanded(
+                                child: Text(
+                                  peerName,
+                                  textAlign: TextAlign.end,
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(
+                                width: 24,
+                              ), // Fixed gap between the name and the button
+                              // Right Half: Phone icon aligned to the left edge of its container
+                              Expanded(
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: IconButton(
+                                    icon: const Icon(
+                                      Icons.phone,
+                                      color: Colors.green,
+                                      size: 60,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.pushNamed(
+                                        context,
+                                        '/call',
+                                        arguments: {
+                                          'isCaller': true,
+                                          'targetId': peerId,
+                                          'myRegisteredId': _myRegisteredId,
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         );
                       },
                     ),
-            ),
+                  ),
           ],
         ),
       ),
