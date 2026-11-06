@@ -45,6 +45,7 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            console.log(`got message ${data}`);
 
             switch (data.type) {
                 case 'register-tablet':
