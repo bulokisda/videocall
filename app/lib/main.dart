@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:call/username_setup_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'background_handler.dart';
 import 'video_call_screen.dart';
+
+String ? savedUsername;
 
 @pragma('vm:entry-point')
 void main() async {
@@ -19,6 +23,9 @@ void main() async {
   } catch (e) {
     debugPrint("WebRTC native binding pass: $e");
   }
+
+  final SharedPreferences prefs = await SharedPreferences.getInstance();
+  savedUsername = prefs.getString('saved_username');
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
@@ -48,7 +55,7 @@ void main() async {
   await flutterLocalNotificationsPlugin.initialize(
     const InitializationSettings(android: initializationSettingsAndroid),
     onDidReceiveNotificationResponse: (NotificationResponse response) {
-      print('--> NOTIFICATION RESPONSE: ${response.actionId}');
+      // print('--> NOTIFICATION RESPONSE: ${response.actionId}');
       if (response.actionId == 'accept_call') {
         FlutterBackgroundService().invoke("notificationAction", {
           "action": "accept",
@@ -60,7 +67,7 @@ void main() async {
         flutterLocalNotificationsPlugin.cancel(100);
 
         // 3. CRITICAL: Gracefully exit the application process to dismiss the UI window instantly
-        SystemNavigator.pop(); 
+        SystemNavigator.pop();
       } else {
         FlutterBackgroundService().invoke("checkStatus");
       }
@@ -72,7 +79,7 @@ void main() async {
   runApp(const MyApp());
 
   scheduleMicrotask(() async {
-    await initializeBackgroundService();
+    await initializeBackgroundService(savedUsername);
   });
 }
 
@@ -85,10 +92,11 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Bisnan Calling',
       theme: ThemeData(brightness: Brightness.dark),
-      initialRoute: '/',
+      initialRoute: savedUsername == null ? '/username' : '/',
       routes: {
         '/': (context) => const HomeScreen(),
         '/call': (context) => const VideoCallScreen(),
+        '/username': (context) => const UsernameSetupScreen(),
       },
     );
   }
@@ -207,8 +215,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (data['type'] == 'mesh-peer-list') {
         if (mounted) {
-          // FIXED: Dynamically discover our own current tablet ID from the list itself!
-          // Looks for the peer marked as 'tablet' (or our name 'Lito')
           final mySelfNode = (data['peers'] as List? ?? []).firstWhere(
             (peer) => peer['type'] == 'tablet',
             orElse: () => null,

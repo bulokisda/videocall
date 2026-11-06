@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:call/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -178,7 +179,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           'senderId':
               _myIdFromArgs ??
               'unknown tablet', // Use the registered ID from args if available
-          'senderName': 'Lito', // Properly configured custom identity anchor
+          'senderName':
+              savedUsername ??
+              'Unknown User', // Properly configured custom identity anchor
           'sdp':
               stableOffer?.sdp ?? offer.sdp, // Fallback if gathering timed out
         }),
@@ -542,7 +545,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         'payload': json.encode({
           'type': 'register-tablet',
           'id': _myNodeId,
-          'name': 'Lito',
+          'name': savedUsername ?? 'Unknown User',
         }),
       });
     } catch (e) {
@@ -607,13 +610,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                 padding: const EdgeInsets.all(8.0),
                 child: Column(
                   children: [
-                    Expanded(
-                      key: const ValueKey('local_window_bucket'),
-                      child: _buildVideoViewFrame(
-                        "You (Local)",
-                        _localRenderer,
-                        true,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        SizedBox(
+                          key: const ValueKey('local_window_bucket'),
+                          height: 180,
+                          width: 200,
+                          child: _buildVideoViewFrame("", _localRenderer, true),
+                        ),
+                        FloatingActionButton(
+                          backgroundColor: Colors.red,
+                          onPressed: _closeAllCallsAndExit,
+                          child: const Icon(
+                            Icons.call_end,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Expanded(
@@ -626,7 +640,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                               ),
                               child: const Center(
                                 child: Text(
-                                  "Connecting stream...",
+                                  "Connecting...",
                                   style: TextStyle(color: Colors.white54),
                                 ),
                               ),
@@ -639,7 +653,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                                       horizontal: 4.0,
                                     ),
                                     child: _buildVideoViewFrame(
-                                      "User: ${entry.key}",
+                                      "", //entry.key,
                                       entry.value,
                                       false,
                                       key: ValueKey(
@@ -652,18 +666,6 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
                             ),
                     ),
                   ],
-                ),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 24,
-              child: Center(
-                child: FloatingActionButton(
-                  backgroundColor: Colors.red,
-                  onPressed: _closeAllCallsAndExit,
-                  child: const Icon(Icons.call_end, color: Colors.white),
                 ),
               ),
             ),
@@ -682,7 +684,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     return Container(
       key: key,
       decoration: BoxDecoration(
-        color: Colors.grey,
+        color: Colors.black,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white10),
       ),

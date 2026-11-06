@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
+// import 'package:call/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 const String signalingServerUrl = "wss://family-video-signaler.onrender.com";
@@ -14,8 +16,11 @@ List<String> pendingWebRtcSignalsQueue = [];
 // FIXED: Cache the accepted call payload to survive app launch boot cycles
 Map<String, dynamic>? acceptedCallPayload;
 String? cachedPeerListMessage;
+String? username;
 
-Future<void> initializeBackgroundService() async {
+Future<void> initializeBackgroundService(String? name) async {
+  username = name; // Store the username for use in the background service
+  // print('--> INITIALIZING BACKGROUND SERVICE WITH USERNAME: $username');
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
@@ -39,7 +44,7 @@ void notificationTapBackgroundHandler(NotificationResponse response) {
   WidgetsFlutterBinding.ensureInitialized();
   
   // This will now print to 'flutter logs' because the Manifest allows the intent to route
-  print('--> RECEIVED FULL SCREEN INTENT BACKGROUND ACTION: ${response.actionId}');
+  // print('--> RECEIVED FULL SCREEN INTENT BACKGROUND ACTION: ${response.actionId}');
   
   if (response.actionId == 'decline_call') {
     final localizedPlugin = FlutterLocalNotificationsPlugin();
@@ -60,7 +65,7 @@ void notificationTapBackgroundHandler(NotificationResponse response) {
       ),
     ).then((_) {
       localizedPlugin.cancel(100);
-      print('--> Notification 100 successfully removed from tray.');
+      // print('--> Notification 100 successfully removed from tray.');
     });
 
     // Notify your persistent background isolate to transmit the websocket hangup packet
@@ -74,7 +79,7 @@ void notificationTapBackgroundHandler(NotificationResponse response) {
 
 
 @pragma('vm:entry-point')
-void onStartBackgroundEngine(ServiceInstance service) {
+Future<void> onStartBackgroundEngine(ServiceInstance service) async {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
@@ -96,8 +101,11 @@ void onStartBackgroundEngine(ServiceInstance service) {
 
   WebSocketChannel? backgroundSocket;
   Timer? backgroundHeartbeat;
+  final SharedPreferences prefs = await SharedPreferences.getInstance();
+  username = prefs.getString('saved_username');
 
   void connectSocket() {
+    // print('--> BACKGROUND ISOLATE CONNECTING TO SIGNALING SERVER WITH USERNAME: $username');
     backgroundHeartbeat?.cancel();
     try {
       backgroundSocket = WebSocketChannel.connect(
@@ -110,7 +118,7 @@ void onStartBackgroundEngine(ServiceInstance service) {
           'id': (registeredId != null && registeredId!.isNotEmpty)
               ? registeredId
               : null,
-          'name': 'Lito', // Fixed compilation guarantee anchor token
+          'name':  username, // Fixed compilation guarantee anchor token
         }),
       );
 
@@ -123,7 +131,7 @@ void onStartBackgroundEngine(ServiceInstance service) {
             'id': (registeredId != null && registeredId!.isNotEmpty)
                 ? registeredId
                 : null,
-            'name': 'Lito',
+            'name': username,
           }),
         );
       });
@@ -241,18 +249,10 @@ void onStartBackgroundEngine(ServiceInstance service) {
             'type': 'hangup',
             'targetId': currentOffer?['senderId'],
             'senderId': currentOffer?['targetId'] ?? 'browser_node',
-            'name': 'Lito',
+            'name': username,
           }),
         );
       }
-      // service.invoke("onSignalReceived", {
-      //   "data": json.encode({
-      //     'type': 'hangup',
-      //     'targetId': currentOffer?['senderId'],
-      //     'senderId': currentOffer?['targetId'] ?? 'browser_node',
-      //     'name': 'Lito',
-      //   }),
-      // });
       currentOffer = null;
     }
   });
