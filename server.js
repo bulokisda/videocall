@@ -5,12 +5,17 @@ const clients = new Map();
 console.log("Manual Mesh Signaling Engine active on port 8080...");
 
 function broadcastPeerList() {
-    // 1. COMPLETELY DYNAMIC MAP (No Hardcoded Strings):
-    const peerList = Array.from(clients.entries()).map(([id, info]) => ({
-        id: id,
-        type: info.type,
-        name: info.name || `${info.type.toUpperCase()} (${id.substring(0, 5)})` // Completely dynamic fallback name setup
-    }));
+    const peerList = Array.from(clients.entries()).map(([id, info]) => {
+        // Safe dynamic fallback name if info.name is missing (e.g. "Tablet (zn40n)" or "Browser (khzti)")
+        const fallbackId = id.includes('_') ? id.split('_')[1] : id.substring(0, 5);
+        const fallbackName = `${info.type.charAt(0).toUpperCase() + info.type.slice(1)} (${fallbackId})`;
+
+        return {
+            id: id,
+            type: info.type,
+            name: info.name || fallbackName
+        };
+    });
     
     clients.forEach((info) => {
         if (info.socket.readyState === WebSocket.OPEN) {
@@ -21,6 +26,7 @@ function broadcastPeerList() {
         }
     });
 }
+
 
 // PERIODIC CLEANUP INTERVAL (Pings clients every 5 seconds to wipe dead tabs instantly)
 setInterval(() => {
@@ -39,26 +45,42 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            console.log(`got message ${message}`);
 
             switch (data.type) {
                 case 'register-tablet':
+                    // FIXED: Dynamic Name Retention (0% Hardcoding)
+                    // 1. Before clearing old mappings, look up if this socket already has a custom name saved.
+                    // 2. If it does, protect and retain it! If it doesn't, grab data.name from the payload.
+                    let existingDeviceName = data.name || null;
+                    
+                    clients.forEach((info, id) => {
+                        if (info.socket === ws && info.name) {
+                            existingDeviceName = info.name;
+                        }
+                    });
+
+                    // Clean out old registrations using this exact socket first
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
                     });
             
                     clientId = data.id || 'tablet_' + Math.random().toString(36).substr(2, 5);
                     
-                    // 2. DYNAMICALY CAPTURE NAME: Saves whatever name the app sends ("Lito", "Kitchen", etc.)
+                    // Final configuration fallback: Prioritize new data payload, preserve old state if empty
+                    const dynamicPersistedName = data.name || existingDeviceName;
+
                     clients.set(clientId, { 
                         socket: ws, 
                         type: 'tablet',
-                        name: data.name // Saves the exact name dynamically! No hardcoded fallbacks here.
+                        name: dynamicPersistedName // Securely locked in across rapid hangups and network drops
                     });
                     
-                    console.log(`Android Node Registered: ${clientId} - Name: ${data.name || 'None'}`);
+                    console.log(`Android Node Registered: ${clientId} - Name: ${dynamicPersistedName || 'None'}`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
+
             
                 case 'register-browser':
                     clients.forEach((info, id) => {
@@ -112,9 +134,9 @@ wss.on('connection', (ws) => {
                             if (info.socket.readyState === WebSocket.OPEN) {
                                 info.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
                             }
-                        });
-                        broadcastPeerList();
+                        });                        
                     }
+                    broadcastPeerList();
                     break;
             }
         } catch (e) {
