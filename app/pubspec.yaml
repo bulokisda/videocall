@@ -30,8 +30,8 @@ flutter_launcher_icons:
   ios: false
   
   # Default fallback image for older devices
-  image_path: "assets/icon/app_icon_flat.png" 
+  image_path: "assets/icon/call.png" 
   
   # Android 10 Adaptive Icon Specifications
   adaptive_icon_background: "#000000" # Your solid background color
-  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+  adaptive_icon_foreground: "assets/icon/call.png"
