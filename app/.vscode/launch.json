@@ -9,7 +9,16 @@
                 "--android-skip-build-dependency-validation",
                 "--no-enable-impeller"
             ]
+        },
+        {
+            "name": "Lito Call (Release Mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release",
+            "toolArgs": [
+                "--android-skip-build-dependency-validation",
+                "--no-enable-impeller"
+            ]
         }
     ]
 }
-

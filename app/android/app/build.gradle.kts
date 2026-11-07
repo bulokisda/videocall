@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.call"
-    compileSdk = 35 // Required by your jni video call plugins
+    compileSdk = 36 // Required by your jni video call plugins
     ndkVersion = "28.2.13676358" // Matches plugin requirement for backward compatibility
 
     defaultConfig {
@@ -31,6 +31,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("debug") 
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

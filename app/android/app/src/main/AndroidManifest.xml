@@ -22,8 +22,7 @@
     <application
         android:label="call"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver" android:exported="false" />
+        android:icon="@mipmap/launcher_icon">
         
         <activity
             android:name=".MainActivity"

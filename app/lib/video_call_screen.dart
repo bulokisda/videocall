@@ -601,78 +601,101 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     final remoteEntriesSnapshot = _remoteRenderers.entries.toList();
 
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
+  backgroundColor: Colors.black,
+  body: SafeArea(
+    child: OrientationBuilder(
+      builder: (context, orientation) {
+        final isLandscape = orientation == Orientation.landscape;
+
+        // Build the control panel (Local video + End Call button)
+        Widget localControlPanel = Flex(
+          direction: isLandscape ? Axis.vertical : Axis.horizontal,
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        SizedBox(
-                          key: const ValueKey('local_window_bucket'),
-                          height: 180,
-                          width: 200,
-                          child: _buildVideoViewFrame("", _localRenderer, true),
-                        ),
-                        FloatingActionButton(
-                          backgroundColor: Colors.red,
-                          onPressed: _closeAllCallsAndExit,
-                          child: const Icon(
-                            Icons.call_end,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      key: const ValueKey('remote_windows_bucket'),
-                      child: remoteEntriesSnapshot.isEmpty
-                          ? Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white10,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  "Connecting...",
-                                  style: TextStyle(color: Colors.white54),
-                                ),
-                              ),
-                            )
-                          : Row(
-                              children: remoteEntriesSnapshot.map((entry) {
-                                return Expanded(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4.0,
-                                    ),
-                                    child: _buildVideoViewFrame(
-                                      "", //entry.key,
-                                      entry.value,
-                                      false,
-                                      key: ValueKey(
-                                        'remote_renderer_frame_${entry.key}',
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                    ),
-                  ],
-                ),
+            SizedBox(
+              key: const ValueKey('local_window_bucket'),
+              height: isLandscape ? 120 : 180,
+              width: isLandscape ? 140 : 200,
+              child: _buildVideoViewFrame("", _localRenderer, true),
+            ),
+            if (isLandscape) const SizedBox(height: 16) else const SizedBox(width: 8),
+            FloatingActionButton(
+              backgroundColor: Colors.red,
+              onPressed: _closeAllCallsAndExit,
+              child: const Icon(
+                Icons.call_end,
+                color: Colors.white,
               ),
             ),
           ],
-        ),
-      ),
-    );
+        );
+
+        // Build the Remote streams panel
+        Widget remoteStreamsPanel = remoteEntriesSnapshot.isEmpty
+            ? Container(
+                decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Center(
+                  child: Text(
+                    "Connecting...",
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                ),
+              )
+            : Flex(
+                direction: isLandscape ? Axis.vertical : Axis.horizontal,
+                children: remoteEntriesSnapshot.map((entry) {
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: isLandscape ? 0.0 : 4.0,
+                        vertical: isLandscape ? 4.0 : 0.0,
+                      ),
+                      child: _buildVideoViewFrame(
+                        "",
+                        entry.value,
+                        false,
+                        key: ValueKey(
+                          'remote_renderer_frame_${entry.key}',
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+
+        // Assemble based on layout orientation
+        return Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Flex(
+            direction: isLandscape ? Axis.horizontal : Axis.vertical,
+            children: [
+              if (isLandscape) ...[
+                localControlPanel,
+                const SizedBox(width: 12),
+                Expanded(
+                  key: const ValueKey('remote_windows_bucket'),
+                  child: remoteStreamsPanel,
+                ),
+              ] else ...[
+                localControlPanel,
+                const SizedBox(height: 8),
+                Expanded(
+                  key: const ValueKey('remote_windows_bucket'),
+                  child: remoteStreamsPanel,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  ),
+);
+
   }
 
   Widget _buildVideoViewFrame(
