@@ -28,33 +28,35 @@
     <div style="display: flex; align-items: center; justify-content: center;"><span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
 
     <script>
+        // Update this block inside your index.html file:
         const rtcConfig = { 
           iceServers: [
-              {
-                urls: "stun:stun.relay.metered.ca:80",
-              },
-              {
-                urls: "turn:standard.relay.metered.ca:80",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um",
-              },
-              {
-                urls: "turn:standard.relay.metered.ca:80?transport=tcp",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um",
-              },
-              {
-                urls: "turn:standard.relay.metered.ca:443",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um",
-              },
+              // 1. PRIMARY SHIELD: Force Secure TLS over Port 443 (TCP)
               {
                 urls: "turns:standard.relay.metered.ca:443?transport=tcp",
                 username: "801acfb381f1738ba4e9e792",
                 credential: "xb8Y+/nANmaFf1Um",
               },
+              
+              // 2. Public Google STUN to gather fast local adapter targets
+              { urls: "stun:://google.com" },
+        
+              // 3. Fallback: Standard TCP over Port 80
+              {
+                urls: "turn:standard.relay.metered.ca:80?transport=tcp",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um",
+              },
+        
+              // 4. Final Fallback: Standard UDP over Port 80
+              {
+                urls: "turn:standard.relay.metered.ca:80",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um",
+              },
           ],
         };
+
 
         let ws = null;
         let localStream = null;
