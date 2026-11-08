@@ -20,7 +20,7 @@
 
 
     <application
-        android:label="call"
+        android:label="Call"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         
