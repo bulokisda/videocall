@@ -31,7 +31,14 @@
         // Update this block inside your index.html file:
         const rtcConfig = { 
           iceServers: [
-              // 1. PRIMARY SHIELD: Secure TLS over Port 443 (TCP)
+              // 1. CELLULAR TRAVERSAL: Standard UDP over Port 443
+              {
+                urls: "turn:standard.relay.metered.ca:443",
+                username: "801acfb381f1738ba4e9e792",
+                credential: "xb8Y+/nANmaFf1Um"
+              },
+        
+              // 2. RESTRICTED WI-FI TRAVERSAL: Secure TLS over Port 443 (TCP)
               {
                 urls: "turns:standard.relay.metered.ca:443?transport=tcp",
                 username: "801acfb381f1738ba4e9e792",
@@ -39,20 +46,20 @@
                 relayProtocol: "tcp"
               },
               
-              // 2. Base Public STUN Lookups
+              // 3. BASE PUBLIC LOOKUP: Google STUN for open networks
               { 
                 urls: "stun:stun.relay.metered.ca:80" 
               },
-
-              // 3. Fallback: Standard TCP over Port 80
+        
+              // 4. FALLBACK: Standard TCP over Port 80
               {
                 urls: "turn:standard.relay.metered.ca:80?transport=tcp",
                 username: "801acfb381f1738ba4e9e792",
                 credential: "xb8Y+/nANmaFf1Um",
                 relayProtocol: "tcp"
               },
-
-              // 4. Final Fallback: Standard UDP over Port 80
+        
+              // 5. FALLBACK: Standard UDP over Port 80
               {
                 urls: "turn:standard.relay.metered.ca:80",
                 username: "801acfb381f1738ba4e9e792",
