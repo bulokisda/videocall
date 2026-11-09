@@ -167,11 +167,27 @@
                         break;
             
                     case 'hangup':
-                        const peerToDisconnect = data.senderId || data.targetId;
-                        console.log("Remote peer requested hangup teardown: " + peerToDisconnect);
-                        if (peerToDisconnect) {
-                            teardownMeshPeer(peerToDisconnect);
+                        console.log("--> Received immediate hangup/decline command from target: " + senderId);
+                        
+                        // 1. Terminate the active RTCPeerConnection instance
+                        const activePC = peerConnections.get(senderId);
+                        if (activePC) {
+                            activePC.getSenders().forEach(sender => {
+                                if (sender.track) sender.track.stop();
+                            });
+                            activePC.close();
+                            peerConnections.delete(senderId);
                         }
+                        
+                        // 2. Clear out any leftover ICE candidate queues for this node
+                        iceQueues.delete(senderId);
+                        
+                        // 3. Reset the UI button states instantly back to standard "Call" 
+                        togglePeerButton(senderId, false);
+                        
+                        // 4. Force clean any residual video layout slots from the DOM grid
+                        const staleVideoBox = document.getElementById(`video-box-${senderId}`);
+                        if (staleVideoBox) staleVideoBox.remove();
                         break;
                 }
             };
