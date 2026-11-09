@@ -6,8 +6,7 @@
             "request": "launch",
             "type": "dart",
             "toolArgs": [
-                "--android-skip-build-dependency-validation",
-                "--no-enable-impeller"
+                "--android-skip-build-dependency-validation"
             ]
         },
         {
@@ -16,8 +15,7 @@
             "type": "dart",
             "flutterMode": "release",
             "toolArgs": [
-                "--android-skip-build-dependency-validation",
-                "--no-enable-impeller"
+                "--android-skip-build-dependency-validation"
             ]
         }
     ]

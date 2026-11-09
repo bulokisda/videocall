@@ -24,53 +24,42 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   MediaStream? _localStream;
   StreamSubscription? _serviceSubscription;
-  // bool _isInitialized = false;
   bool _isHandshakeComplete = false;
   bool _hasStartedBootstrap = false;
   String? _myNodeId;
   String? _myIdFromArgs;
 
-  // final Map<String, dynamic> _rtcConfig = {
-  //   'iceServers': [
-  //     {
-  //       'urls': [
-  //         'stun:stun.l.google.com:19302',
-  //         'stun:stun1.l.google.com:19302',
-  //       ],
-  //     },
-  //     {
-  //       'urls': [
-  //         'turn:openrelay.metered.ca:80',
-  //         'turn:openrelay.metered.ca:443',
-  //         'turn:openrelay.metered.ca:443?transport=tcp',
-  //       ],
-  //       'username': 'openrelayproject',
-  //       'credential': 'openrelayprojectsecret',
-  //     }
-  //   ],
-  //   'sdpSemantics': 'unified-plan',
-  // };
-
   final Map<String, dynamic> _rtcConfig = {
     'iceServers': [
-      {'urls': "stun:stun.relay.metered.ca:80"},
-      {
-        'urls': "turn:standard.relay.metered.ca:80",
-        'username': "801acfb381f1738ba4e9e792",
-        'credential': "xb8Y+/nANmaFf1Um",
-      },
-      {
-        'urls': "turn:standard.relay.metered.ca:80?transport=tcp",
-        'username': "801acfb381f1738ba4e9e792",
-        'credential': "xb8Y+/nANmaFf1Um",
-      },
+      // 1. PRIMARY CELLULAR TRAVERSAL: Standard UDP over Port 443
       {
         'urls': "turn:standard.relay.metered.ca:443",
         'username': "801acfb381f1738ba4e9e792",
         'credential': "xb8Y+/nANmaFf1Um",
       },
+
+      // 2. PRIMARY RESTRICTED WI-FI SHIELD: Secure TLS over Port 443 (TCP)
       {
         'urls': "turns:standard.relay.metered.ca:443?transport=tcp",
+        'username': "801acfb381f1738ba4e9e792",
+        'credential': "xb8Y+/nANmaFf1Um",
+        'relayProtocol': "tcp",
+      },
+
+      // 3. BASE PUBLIC STUN LOOKUP: Google STUN for open/local discovery paths
+      {'urls': "stun:stun.relay.metered.ca:80"},
+
+      // 4. FALLBACK: Standard TCP over Port 80
+      {
+        'urls': "turn:standard.relay.metered.ca:80?transport=tcp",
+        'username': "801acfb381f1738ba4e9e792",
+        'credential': "xb8Y+/nANmaFf1Um",
+        'relayProtocol': "tcp",
+      },
+
+      // 5. FALLBACK: Standard UDP over Port 80
+      {
+        'urls': "turn:standard.relay.metered.ca:80",
         'username': "801acfb381f1738ba4e9e792",
         'credential': "xb8Y+/nANmaFf1Um",
       },
@@ -274,15 +263,19 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               await _handleIncomingMeshAnswer(peerId, data['sdp'].toString());
               break;
 
+            // 🟢 FIXED CANDIDATE SIGNAL FILTER BLOCK:
             case 'ice-candidate':
               if (peerId == null) return;
               if (data['candidate'] != null) {
                 var candidateMap = data['candidate'];
                 String rawCandidateString = candidateMap['candidate'] ?? '';
 
-                if (rawCandidateString.contains(' tcp ') ||
-                    rawCandidateString.contains('tcptype') ||
-                    rawCandidateString.contains('fdf7:')) {
+                // ALLOW 'tcp' and 'tcptype' to pass through natively!
+                // Only drop local link-local strings that can cause cross-platform crashes.
+                if (rawCandidateString.contains('fdf7:')) {
+                  debugPrint(
+                    "--> Dropping local IPv6 anchor link: $rawCandidateString",
+                  );
                   return;
                 }
 
@@ -370,6 +363,12 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       _activeHandshakesInFlight.add(peerId);
       _isHandshakeComplete = false;
 
+      // 🟢 1. NATIVE WARM-UP DELAY: Gives Android hardware layers time to bind securely
+      debugPrint(
+        "--> Preparing native WebRTC engine workspace for incoming handshake...",
+      );
+      await Future.delayed(const Duration(milliseconds: 400));
+
       RTCPeerConnection pc;
       if (!_peerConnections.containsKey(peerId)) {
         pc = await _createNewPeerConnectionNode(peerId);
@@ -388,11 +387,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         sdpString += '\r\n';
       }
 
-      // 1. First set the remote description from the browser
+      // 🟢 2. TRACE LOGGING: Verify remote description processing
+      debugPrint(
+        "--> Applying browser remote offer description mapping string...",
+      );
       await pc.setRemoteDescription(RTCSessionDescription(sdpString, 'offer'));
+      debugPrint("--> Remote description applied successfully.");
 
-      // 2. FIXED: Attach local tracks BEFORE creating the Answer SDP
-      // This forces WebRTC to write the tablet's camera streams into the answer payload.
+      // Attach local tracks BEFORE creating the Answer SDP
       if (_localStream != null) {
         for (var track in _localStream!.getTracks()) {
           try {
@@ -412,14 +414,30 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       });
       await pc.setLocalDescription(answer);
 
-      // 4. Ship the complete, track-aware Answer to the signaling server
+      // 🟢 FIXED: Give WebRTC a brief window to gather local TCP/TLS candidates
+      // into the SDP text profile string before broadcasting it back to the browser node.
+      int checks = 0;
+      while (pc.iceGatheringState !=
+              RTCIceGatheringState.RTCIceGatheringStateComplete &&
+          checks < 20) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        checks++;
+      }
+
+      // Fetch the compiled local session profile containing the secure TCP/TLS network routes
+      final stableAnswer = await pc.getLocalDescription();
+
+      // 4. Ship the updated, track-aware Answer to the signaling server
       FlutterBackgroundService().invoke('sendSignal', {
         'payload': json.encode({
           'type': 'answer',
           'targetId': peerId,
-          'sdp': answer.sdp,
+          'sdp':
+              stableAnswer?.sdp ?? answer.sdp, // Use gathered fallback securely
         }),
       });
+
+      debugPrint("--> Answer successfully dispatched to signaling hub.");
 
       if (mounted) {
         setState(() {
@@ -433,6 +451,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         );
         _bufferedRemoteIceCandidates.remove(peerId);
 
+        debugPrint(
+          "--> Draining ${_bufferedRemoteIceCandidates.length} early buffered candidates...",
+        );
         for (var cand in candidates) {
           try {
             await pc.addCandidate(cand);
@@ -440,7 +461,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         }
       }
     } catch (error) {
-      debugPrint("Handshake crashed safely: $error");
+      debugPrint(
+        "❌ CRITICAL: Handshake crashed inside video_call_screen: $error",
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _removePeer(peerId);
       });
@@ -601,101 +624,98 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     final remoteEntriesSnapshot = _remoteRenderers.entries.toList();
 
     return Scaffold(
-  backgroundColor: Colors.black,
-  body: SafeArea(
-    child: OrientationBuilder(
-      builder: (context, orientation) {
-        final isLandscape = orientation == Orientation.landscape;
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: OrientationBuilder(
+          builder: (context, orientation) {
+            final isLandscape = orientation == Orientation.landscape;
 
-        // Build the control panel (Local video + End Call button)
-        Widget localControlPanel = Flex(
-          direction: isLandscape ? Axis.vertical : Axis.horizontal,
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              key: const ValueKey('local_window_bucket'),
-              height: isLandscape ? 120 : 180,
-              width: isLandscape ? 140 : 200,
-              child: _buildVideoViewFrame("", _localRenderer, true),
-            ),
-            if (isLandscape) const SizedBox(height: 16) else const SizedBox(width: 8),
-            FloatingActionButton(
-              backgroundColor: Colors.red,
-              onPressed: _closeAllCallsAndExit,
-              child: const Icon(
-                Icons.call_end,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        );
-
-        // Build the Remote streams panel
-        Widget remoteStreamsPanel = remoteEntriesSnapshot.isEmpty
-            ? Container(
-                decoration: BoxDecoration(
-                  color: Colors.white10,
-                  borderRadius: BorderRadius.circular(12),
+            // Build the control panel (Local video + End Call button)
+            Widget localControlPanel = Flex(
+              direction: isLandscape ? Axis.vertical : Axis.horizontal,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  key: const ValueKey('local_window_bucket'),
+                  height: isLandscape ? 120 : 180,
+                  width: isLandscape ? 140 : 200,
+                  child: _buildVideoViewFrame("", _localRenderer, true),
                 ),
-                child: const Center(
-                  child: Text(
-                    "Connecting...",
-                    style: TextStyle(color: Colors.white54),
-                  ),
-                ),
-              )
-            : Flex(
-                direction: isLandscape ? Axis.vertical : Axis.horizontal,
-                children: remoteEntriesSnapshot.map((entry) {
-                  return Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: isLandscape ? 0.0 : 4.0,
-                        vertical: isLandscape ? 4.0 : 0.0,
-                      ),
-                      child: _buildVideoViewFrame(
-                        "",
-                        entry.value,
-                        false,
-                        key: ValueKey(
-                          'remote_renderer_frame_${entry.key}',
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              );
-
-        // Assemble based on layout orientation
-        return Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Flex(
-            direction: isLandscape ? Axis.horizontal : Axis.vertical,
-            children: [
-              if (isLandscape) ...[
-                localControlPanel,
-                const SizedBox(width: 12),
-                Expanded(
-                  key: const ValueKey('remote_windows_bucket'),
-                  child: remoteStreamsPanel,
-                ),
-              ] else ...[
-                localControlPanel,
-                const SizedBox(height: 8),
-                Expanded(
-                  key: const ValueKey('remote_windows_bucket'),
-                  child: remoteStreamsPanel,
+                if (isLandscape)
+                  const SizedBox(height: 16)
+                else
+                  const SizedBox(width: 8),
+                FloatingActionButton(
+                  backgroundColor: Colors.red,
+                  onPressed: _closeAllCallsAndExit,
+                  child: const Icon(Icons.call_end, color: Colors.white),
                 ),
               ],
-            ],
-          ),
-        );
-      },
-    ),
-  ),
-);
+            );
 
+            // Build the Remote streams panel
+            Widget remoteStreamsPanel = remoteEntriesSnapshot.isEmpty
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        "Connecting...",
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    ),
+                  )
+                : Flex(
+                    direction: isLandscape ? Axis.vertical : Axis.horizontal,
+                    children: remoteEntriesSnapshot.map((entry) {
+                      return Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isLandscape ? 0.0 : 4.0,
+                            vertical: isLandscape ? 4.0 : 0.0,
+                          ),
+                          child: _buildVideoViewFrame(
+                            "",
+                            entry.value,
+                            false,
+                            key: ValueKey('remote_renderer_frame_${entry.key}'),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  );
+
+            // Assemble based on layout orientation
+            return Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Flex(
+                direction: isLandscape ? Axis.horizontal : Axis.vertical,
+                children: [
+                  if (isLandscape) ...[
+                    localControlPanel,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      key: const ValueKey('remote_windows_bucket'),
+                      child: remoteStreamsPanel,
+                    ),
+                  ] else ...[
+                    localControlPanel,
+                    const SizedBox(height: 8),
+                    Expanded(
+                      key: const ValueKey('remote_windows_bucket'),
+                      child: remoteStreamsPanel,
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 
   Widget _buildVideoViewFrame(
