@@ -9,6 +9,7 @@ import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 const String signalingServerUrl = "wss://family-video-signaler.onrender.com";
 
@@ -169,17 +170,17 @@ class BackgroundEngineState {
       id: uuid,
       nameCaller: senderName,
       appName: 'Bisnan Calling',
-      // avatar: 'https://pravatar.cc',
+      avatar: 'assets/icon/call.png',
       type: 1,
       duration: 30000,
       textAccept: 'Answer',
       textDecline: 'Decline',
       android: const AndroidParams(
         isCustomNotification: true,
-        isShowLogo: false,
+        isShowLogo: true,
         ringtonePath: 'system_ringtone_default',
         backgroundColor: '#075E54',
-        // backgroundUrl: 'https://pravatar.cc',
+        backgroundUrl: 'assets/icon/call.png',
         actionColor: '#4CAF50',
         incomingCallNotificationChannelName: 'Incoming Video Calls',
       ),
@@ -232,7 +233,6 @@ class BackgroundEngineState {
                   'name': username,
                 }),
               );
-
             } catch (e) {
               // print("XXX CallKit Wire: Network fast-path push failed: $e");
             }
@@ -242,7 +242,6 @@ class BackgroundEngineState {
           // Schedule heavy camera/audio hardware teardown tasks to run asynchronously
           // in a separate macro-task loop execution frame.
           Future.delayed(Duration.zero, () async {
-
             // Clean local offer states
             currentOffer = null;
             acceptedCallPayload = null;
@@ -270,6 +269,12 @@ Future<void> initializeBackgroundService(String? name) async {
   if (await service.isRunning()) {
     service.invoke('checkStatus');
     return;
+  }
+
+  // Ensure mandatory runtime permissions are asked upfront (Crucial for Android 14 validation checks)
+  // This executes cleanly on Android 10 without breaking initialization streams.
+  if (await Permission.phone.isDenied) {
+    await Permission.phone.request();
   }
 
   await service.configure(

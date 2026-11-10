@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     >
 
     <!-- Permissions required for Background Video Calls on Android 10 -->
@@ -18,6 +19,9 @@
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <!-- Required ONLY for Android 14 (API 34) and above (Ignored by Android 10) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
 
     <application
         android:label="Call"
@@ -43,13 +47,14 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-        </activity>
+        </activity> 
 
-        <service
-            android:name="id.flutter.plugins.backgroundservice.BackgroundService"
-            android:foregroundServiceType="camera|microphone"
+         <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="camera|microphone|phoneCall"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="true"
+            tools:replace="android:exported" />  
         
         <meta-data
             android:name="flutterEmbedding"

@@ -292,8 +292,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 16),
                         Text(
                           _isOnline
-                              ? "Online, but no available targets found."
-                              : "Remote call service connection offline.",
+                              ? "Online"
+                              : "Offline",
                           style: const TextStyle(
                             color: Colors.grey,
                             fontSize: 16,
