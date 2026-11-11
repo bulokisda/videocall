@@ -72,6 +72,16 @@ wss.on('connection', (ws) => {
                     // Final configuration fallback: Prioritize new data payload, preserve old state if empty
                     const dynamicPersistedName = data.name || existingDeviceName;
 
+                    // Purge any stale socket already registered under the same username
+                    if (dynamicPersistedName) {
+                        clients.forEach((info, id) => {
+                            if (info.type === 'tablet' && info.name === dynamicPersistedName) {
+                                console.log(`Purging stale network session for ${dynamicPersistedName}: ${id}`);
+                                clients.delete(id);
+                            }
+                        });
+                    }
+
                     clients.set(clientId, { 
                         socket: ws, 
                         type: 'tablet',
