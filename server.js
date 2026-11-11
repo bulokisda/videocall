@@ -45,7 +45,9 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            console.log(`got message ${message}`);
+            if (data.type !== 'ping') {
+                console.log(`got message ${message}`);
+            }
 
             switch (data.type) {
                 case 'register-tablet':
@@ -138,6 +140,27 @@ wss.on('connection', (ws) => {
                     }
                     broadcastPeerList();
                     break;
+
+                case 'ping':
+                    // 1. Self-heal registration if Render restarted and wiped the in-memory Map
+                    if (data.id && !clients.has(data.id)) {
+                        clientId = data.id;
+                        clients.set(clientId, {
+                            socket: ws,
+                            type: 'tablet',
+                            name: data.name || null
+                        });
+                        console.log(`Self-healed node registration from ping: ${clientId} - Name: ${data.name || 'None'}`);
+                        ws.send(JSON.stringify({ type: 'registered', id: clientId }));
+                        broadcastPeerList();
+                    }
+
+                    // 2. Reply with pong to maintain two-way traffic through Render's load balancer
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'pong' }));
+                    }
+                    break;
+
             }
         } catch (e) {
             console.error("Signaling error:", e);
