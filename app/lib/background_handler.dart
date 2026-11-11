@@ -10,12 +10,15 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 const String signalingServerUrl = "wss://family-video-signaler.onrender.com";
 
 class BackgroundEngineState {
   static WebSocketChannel? socket;
   static Timer? heartbeat;
+  static Timer? pongTimeout; // Tracks server pong response
+
   static bool isConnecting = false;
   static bool isSocketReady = false;
   static String? registeredId;
@@ -48,6 +51,8 @@ class BackgroundEngineState {
     try {
       debugPrint("--> Background isolate establishing stable websocket...");
       socket = WebSocketChannel.connect(Uri.parse(signalingServerUrl));
+      await socket!
+          .ready; // Ensures DNS/TCP errors stay inside the try/catch block
       isSocketReady = true;
 
       socket!.sink.add(
@@ -72,6 +77,15 @@ class BackgroundEngineState {
                 'name': username,
               }),
             );
+
+            // Expect a pong reply within 10 seconds
+            pongTimeout?.cancel();
+            pongTimeout = Timer(const Duration(seconds: 10), () {
+              debugPrint(
+                "--> Pong timeout! Server unresponsive, reconnecting...",
+              );
+              _handleDisconnect(service);
+            });
           } catch (e) {
             _handleDisconnect(service);
           }
@@ -84,6 +98,12 @@ class BackgroundEngineState {
         (message) {
           isConnecting = false;
           var data = json.decode(message);
+
+          if (data['type'] == 'pong') {
+            pongTimeout?.cancel();
+            pongTimeout = null;
+            return; // No need to forward routine pongs to the UI isolate
+          }
 
           if (data['type'] == 'registered') registeredId = data['id'];
           if (data['type'] == 'mesh-peer-list') cachedPeerListMessage = message;
@@ -141,6 +161,9 @@ class BackgroundEngineState {
     isConnecting = false;
     heartbeat?.cancel();
     heartbeat = null;
+    pongTimeout?.cancel();
+    pongTimeout = null;
+
     try {
       socket?.sink.close();
     } catch (_) {}
@@ -200,8 +223,13 @@ class BackgroundEngineState {
         // 🟢 FIXED: Updated enum maps to use matching upper-case constants
         case Event.ACTION_CALL_ACCEPT:
           if (serviceInstance != null && acceptedCallPayload != null) {
+            final payloadToSend = Map<String, dynamic>.from(
+              acceptedCallPayload!,
+            );
+            acceptedCallPayload =
+                null; // Clear immediately to prevent duplicate triggers
             serviceInstance!.invoke("onSignalReceived", {
-              "data": json.encode(acceptedCallPayload),
+              "data": json.encode(payloadToSend),
             });
           }
           break;
@@ -264,17 +292,41 @@ class BackgroundEngineState {
 
 Future<void> initializeBackgroundService(String? name) async {
   BackgroundEngineState.username = name;
+
+  await [
+    Permission.notification,
+    Permission.camera,
+    Permission.microphone,
+  ].request();
+
+  // Prompt to exempt app from Android Doze/battery throttling if not already unrestricted
+  if (await Permission.ignoreBatteryOptimizations.isDenied) {
+    await Permission.ignoreBatteryOptimizations.request();
+  }
+
+  // 🟢 Create the notification channel BEFORE starting the foreground service
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'incoming_call_channel', // Must match notificationChannelId below
+    'Background Call Service',
+    description: 'Keeps connection active for incoming video calls',
+    importance: Importance
+        .low, // Low importance prevents constant sound/vibration on startup
+  );
+
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >()
+      ?.createNotificationChannel(channel);
+
   final service = FlutterBackgroundService();
 
   if (await service.isRunning()) {
     service.invoke('checkStatus');
     return;
-  }
-
-  // Ensure mandatory runtime permissions are asked upfront (Crucial for Android 14 validation checks)
-  // This executes cleanly on Android 10 without breaking initialization streams.
-  if (await Permission.phone.isDenied) {
-    await Permission.phone.request();
   }
 
   await service.configure(
@@ -283,8 +335,8 @@ Future<void> initializeBackgroundService(String? name) async {
       autoStart: true,
       isForegroundMode: true,
       notificationChannelId: 'incoming_call_channel',
-      initialNotificationTitle: 'Waiting for call...',
-      initialNotificationContent: '',
+      initialNotificationTitle: 'Bisnan Calling',
+      initialNotificationContent: 'Waiting for call...',
     ),
     iosConfiguration: IosConfiguration(
       autoStart: true,
@@ -336,6 +388,15 @@ Future<void> onStartBackgroundEngine(ServiceInstance service) async {
   });
 
   service.on('reconnect').listen((event) {
+    debugPrint("--> Manual reconnect triggered by UI.");
+    BackgroundEngineState.heartbeat?.cancel();
+    BackgroundEngineState.heartbeat = null;
+    BackgroundEngineState.pongTimeout?.cancel();
+    BackgroundEngineState.pongTimeout = null;
+    try {
+      BackgroundEngineState.socket?.sink.close();
+    } catch (_) {}
+    BackgroundEngineState.socket = null;
     BackgroundEngineState.isSocketReady = false;
     BackgroundEngineState.isConnecting = false;
     BackgroundEngineState.connect(service);
@@ -343,7 +404,13 @@ Future<void> onStartBackgroundEngine(ServiceInstance service) async {
 
   service.on('stopService').listen((event) {
     BackgroundEngineState.heartbeat?.cancel();
-    BackgroundEngineState.socket?.sink.close();
+    BackgroundEngineState.heartbeat = null;
+    BackgroundEngineState.pongTimeout?.cancel();
+    BackgroundEngineState.pongTimeout = null;
+    try {
+      BackgroundEngineState.socket?.sink.close();
+    } catch (_) {}
+    BackgroundEngineState.socket = null;
     service.stopSelf();
   });
 
@@ -351,6 +418,10 @@ Future<void> onStartBackgroundEngine(ServiceInstance service) async {
     if (BackgroundEngineState.socket != null && event != null) {
       BackgroundEngineState.socket!.sink.add(event['payload']);
     }
+  });
+
+  service.on('endCall').listen((event) {
+    BackgroundEngineState._clearActiveCallData();
   });
 
   BackgroundEngineState.connect(service);

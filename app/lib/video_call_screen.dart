@@ -109,9 +109,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           debugPrint("--> App initiating outgoing call to $targetPeerId");
           await _createOutgoingMeshOffer(targetPeerId);
         } else {
-          // Existing incoming call answer workflow
           String actualSenderId = args['senderId'] ?? "browser_node";
           dynamic remoteSdp = args['sdp'];
+          if (remoteSdp == null || remoteSdp.toString().isEmpty) {
+            debugPrint(
+              "❌ Missing SDP payload on incoming call answer. Exiting.",
+            );
+            _closeAllCallsAndExit();
+            return;
+          }
           await _handleIncomingMeshOffer(actualSenderId, remoteSdp);
         }
       }
@@ -559,18 +565,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         });
       }
 
-      // This triggers the 'decline' action block we fixed above, emptying the queues
-      FlutterBackgroundService().invoke("notificationAction", {
-        "action": "decline",
-      });
-
-      FlutterBackgroundService().invoke('sendSignal', {
-        'payload': json.encode({
-          'type': 'register-tablet',
-          'id': _myNodeId,
-          'name': savedUsername ?? 'Unknown User',
-        }),
-      });
+      // Only dismiss native CallKit UI; keep the WebSocket alive
+      FlutterBackgroundService().invoke('endCall');
     } catch (e) {
       debugPrint("Error sending clean hangup signal: $e");
     }

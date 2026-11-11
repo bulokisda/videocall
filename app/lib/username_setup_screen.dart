@@ -16,6 +16,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   void _submitUsername() async {
     if (_formKey.currentState!.validate()) {
       final String enteredName = _controller.text.trim();
+      savedUsername = enteredName;
       
       // 1. Save persistently to disk storage
       final SharedPreferences prefs = await SharedPreferences.getInstance();

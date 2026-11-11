@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'background_handler.dart';
 import 'video_call_screen.dart';
 
+const String appReleaseTag = "v1.0.4";
+
 String? savedUsername;
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -179,8 +181,11 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       // Any valid signal payload implies the socket service pipeline is running online
-      if (!_isOnline) {
-        setState(() => _isOnline = true);
+      if (!_isOnline || _isReconnecting) {
+        setState(() {
+          _isOnline = true;
+          _isReconnecting = false;
+        });
       }
 
       if (data['type'] == 'registered') {
@@ -236,18 +241,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (data['type'] == 'mesh-peer-list') {
         if (mounted) {
-          final mySelfNode = (data['peers'] as List? ?? []).firstWhere(
-            (peer) => peer['type'] == 'tablet',
-            orElse: () => null,
-          );
           setState(() {
             _discoveredNetworkPeers = data['peers'] ?? [];
-            if (mySelfNode != null) {
-              _myRegisteredId = mySelfNode['id'];
-              debugPrint(
-                "--> Dynamically synced current Tablet ID: $_myRegisteredId",
-              );
-            }
           });
           debugPrint(
             "--> UI Rebuilt! Found ${_discoveredNetworkPeers.length} total raw nodes.",
@@ -274,6 +269,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text("Bisnan Video Call"), centerTitle: true),
+      bottomNavigationBar: const Padding(
+        padding: EdgeInsets.only(bottom: 12.0),
+        child: Text(
+          appReleaseTag,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+      ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -291,9 +294,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          _isOnline
-                              ? "Online"
-                              : "Offline",
+                          _isOnline ? "Online" : "Offline",
                           style: const TextStyle(
                             color: Colors.grey,
                             fontSize: 16,
@@ -329,47 +330,50 @@ class _HomeScreenState extends State<HomeScreen> {
                         final String peerId = peer['id'] ?? 'Unknown';
                         final String peerName = peer['name'] ?? 'Unknown';
                         return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  peerName,
-                                  textAlign: TextAlign.end,
-                                  style: const TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32.0,
+                            vertical: 10.0,
+                          ),
+                          child: SizedBox(
+                            width: double.infinity,
+                            height: 76,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green.shade600,
+                                foregroundColor: Colors.white,
+                                elevation: 6,
+                                shadowColor: Colors.greenAccent.withValues(alpha: 0.4),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
                                 ),
                               ),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: IconButton(
-                                    icon: const Icon(
-                                      Icons.phone,
-                                      color: Colors.green,
-                                      size: 60,
-                                    ),
-                                    onPressed: () {
-                                      Navigator.pushNamed(
-                                        context,
-                                        '/call',
-                                        arguments: {
-                                          'isCaller': true,
-                                          'targetId': peerId,
-                                          'myRegisteredId': _myRegisteredId,
-                                        },
-                                      );
-                                    },
-                                  ),
+                              icon: const Icon(Icons.phone, size: 36),
+                              label: Text(
+                                "Call $peerName",
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                            ],
+                              onPressed: () {
+                                Navigator.pushNamed(
+                                  context,
+                                  '/call',
+                                  arguments: {
+                                    'isCaller': true,
+                                    'targetId': peerId,
+                                    'myRegisteredId': _myRegisteredId,
+                                  },
+                                );
+                              },
+                            ),
                           ),
                         );
                       },
+
+                    
+                    
+                    
                     ),
                   ),
           ],
