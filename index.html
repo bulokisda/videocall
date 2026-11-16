@@ -230,280 +230,311 @@
         </div>
     </div>
 
-    <script>
-        const RENDER_HTTP_BASE = 'https://family-video-signaler.onrender.com';
-        const RENDER_WS_BASE = 'wss://family-video-signaler.onrender.com';
+<script>
+    const RENDER_HTTP_BASE = 'https://family-video-signaler.onrender.com';
+    const RENDER_WS_BASE = 'wss://family-video-signaler.onrender.com';
 
-        let ws = null;
-        let pc = null;
-        let localStream = null;
-        let myId = null;
-        let activeTargetId = null;
-        let cachedIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-        let reconnectTimer = null;
+    let ws = null;
+    let pc = null;
+    let localStream = null;
+    let myId = null;
+    let activeTargetId = null;
+    let cachedIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    let reconnectTimer = null;
 
-        const statusBadge = document.getElementById('statusBadge');
-        const callerNameInput = document.getElementById('callerNameInput');
-        const roomSecretInput = document.getElementById('roomSecretInput');
-        const connectBtn = document.getElementById('connectBtn');
-        const clearAuthBtn = document.getElementById('clearAuthBtn');
-        const startCamBtn = document.getElementById('startCamBtn');
-        const toggleMicBtn = document.getElementById('toggleMicBtn');
-        const toggleCamBtn = document.getElementById('toggleCamBtn');
-        const hangupBtn = document.getElementById('hangupBtn');
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        const remoteLabel = document.getElementById('remoteLabel');
-        const peerListEl = document.getElementById('peerList');
+    const statusBadge = document.getElementById('statusBadge');
+    const callerNameInput = document.getElementById('callerNameInput');
+    const roomSecretInput = document.getElementById('roomSecretInput');
+    const connectBtn = document.getElementById('connectBtn');
+    const clearAuthBtn = document.getElementById('clearAuthBtn');
+    const startCamBtn = document.getElementById('startCamBtn');
+    const toggleMicBtn = document.getElementById('toggleMicBtn');
+    const toggleCamBtn = document.getElementById('toggleCamBtn');
+    const hangupBtn = document.getElementById('hangupBtn');
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const remoteLabel = document.getElementById('remoteLabel');
+    const peerListEl = document.getElementById('peerList');
 
-        // Load saved credentials from localStorage
-        callerNameInput.value = localStorage.getItem('bisnan_caller_name') || '';
-        roomSecretInput.value = localStorage.getItem('bisnan_room_secret') || '';
+    callerNameInput.value = localStorage.getItem('bisnan_caller_name') || '';
+    roomSecretInput.value = localStorage.getItem('bisnan_room_secret') || '';
 
-        function setStatus(text, state = '') {
-            statusBadge.textContent = text;
-            statusBadge.className = 'status-badge ' + state;
+    function setStatus(text, state = '') {
+      statusBadge.textContent = text;
+      statusBadge.className = 'status-badge ' + state;
+    }
+
+    async function refreshIceServers(token) {
+      try {
+        const res = await fetch(`${RENDER_HTTP_BASE}/ice-servers?token=${encodeURIComponent(token)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+          cachedIceServers = data.iceServers;
         }
+      } catch (err) {
+        console.warn('Could not fetch TURN servers, falling back to STUN:', err.message);
+      }
+    }
 
-        // Fetch temporary TURN servers dynamically from Render (keeps Metered API key hidden)
-        async function refreshIceServers(token) {
-            try {
-                const res = await fetch(`${RENDER_HTTP_BASE}/ice-servers?token=${encodeURIComponent(token)}`);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-                    cachedIceServers = data.iceServers;
-                }
-            } catch (err) {
-                console.warn('Could not fetch TURN servers, falling back to STUN:', err.message);
+    async function startCamera() {
+      if (localStream) return localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+        startCamBtn.textContent = 'Camera Active';
+        startCamBtn.disabled = true;
+        toggleMicBtn.disabled = false;
+        toggleCamBtn.disabled = false;
+        return localStream;
+      } catch (err) {
+        alert('Camera/Microphone permission is required: ' + err.message);
+        throw err;
+      }
+    }
+
+    function createPeerConnection(targetId) {
+      if (pc) pc.close();
+      activeTargetId = targetId;
+      pc = new RTCPeerConnection({ iceServers: cachedIceServers });
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams.length > 0) {
+          remoteVideo.srcObject = event.streams.item(0);
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'ice-candidate',
+            targetId: activeTargetId,
+            candidate: event.candidate
+          }));
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          setStatus('In Call', 'connected');
+          hangupBtn.disabled = false;
+        } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+          endCallLocally();
+        }
+      };
+
+      return pc;
+    }
+
+    async function callPeer(targetId, targetName) {
+      await startCamera();
+      const token = roomSecretInput.value.trim();
+      if (token) await refreshIceServers(token);
+
+      remoteLabel.textContent = targetName || targetId;
+      setStatus(`Calling ${targetName || targetId}...`);
+      hangupBtn.disabled = false;
+
+      const peerConn = createPeerConnection(targetId);
+      const offer = await peerConn.createOffer();
+      await peerConn.setLocalDescription(offer);
+
+      ws.send(JSON.stringify({
+        type: 'offer',
+        targetId: targetId,
+        callerName: callerNameInput.value.trim() || 'Web Browser',
+        sdp: offer
+      }));
+    }
+
+    function endCallLocally() {
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      activeTargetId = null;
+      remoteVideo.srcObject = null;
+      remoteLabel.textContent = 'Remote Caller';
+      hangupBtn.disabled = true;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        setStatus('Connected', 'connected');
+      }
+    }
+
+    function renderPeerList(peers) {
+      peerListEl.innerHTML = '';
+      const others = peers.filter(p => p.id !== myId);
+
+      if (others.length === 0) {
+        const empty = document.createElement('span');
+        empty.style.color = 'var(--muted)';
+        empty.style.fontSize = '0.9rem';
+        empty.textContent = 'No other family devices online right now.';
+        peerListEl.appendChild(empty);
+        return;
+      }
+
+      others.forEach(peer => {
+        const row = document.createElement('div');
+        row.className = 'peer-item';
+
+        const label = document.createElement('span');
+        label.textContent = `${peer.name} (${peer.type})`;
+
+        const btn = document.createElement('button');
+        btn.textContent = 'Call';
+        btn.onclick = () => callPeer(peer.id, peer.name);
+
+        row.appendChild(label);
+        row.appendChild(btn);
+        peerListEl.appendChild(row);
+      });
+    }
+
+    async function connectSignaling() {
+      const name = callerNameInput.value.trim() || 'Family Web';
+      const token = roomSecretInput.value.trim();
+
+      if (!token) {
+        setStatus('Secret Required', 'error');
+        return;
+      }
+
+      localStorage.setItem('bisnan_caller_name', name);
+      localStorage.setItem('bisnan_room_secret', token);
+
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+
+      setStatus('Connecting...');
+      await refreshIceServers(token);
+
+      ws = new WebSocket(`${RENDER_WS_BASE}/?token=${encodeURIComponent(token)}`);
+
+      ws.onopen = () => {
+        setStatus('Connected', 'connected');
+        ws.send(JSON.stringify({
+          type: 'register-browser',
+          name: name
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+
+        switch (data.type) {
+          case 'registered':
+            myId = data.id;
+            break;
+
+          case 'mesh-peer-list':
+            renderPeerList(data.peers || []);
+            break;
+
+          case 'offer': {
+            const accept = confirm(`Incoming call from ${data.callerName || data.senderId}. Answer?`);
+            if (!accept) {
+              ws.send(JSON.stringify({ type: 'call-decline', targetId: data.senderId }));
+              return;
             }
-        }
-
-        async function startCamera() {
-            if (localStream) return localStream;
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
-                startCamBtn.textContent = 'Camera Active';
-                startCamBtn.disabled = true;
-                toggleMicBtn.disabled = false;
-                toggleCamBtn.disabled = false;
-                return localStream;
-            } catch (err) {
-                alert('Camera/Microphone permission is required: ' + err.message);
-                throw err;
-            }
-        }
-
-        function createPeerConnection(targetId) {
-            if (pc) pc.close();
-            activeTargetId = targetId;
-            pc = new RTCPeerConnection({ iceServers: cachedIceServers });
-
-            if (localStream) {
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-            }
-
-            pc.ontrack = (event) => {
-                if (remoteVideo.srcObject !== event.streams[0]) {
-                    remoteVideo.srcObject = event.streams[0];
-                }
-            };
-
-            pc.onicecandidate = (event) => {
-                if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'ice-candidate',
-                        targetId: activeTargetId,
-                        candidate: event.candidate
-                    }));
-                }
-            };
-
-            pc.onconnectionstatechange = () => {
-                if (pc.connectionState === 'connected') {
-                    setStatus('In Call', 'connected');
-                    hangupBtn.disabled = false;
-                } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
-                    endCallLocally();
-                }
-            };
-
-            return pc;
-        }
-
-        async function callPeer(targetId, targetName) {
             await startCamera();
-            const token = roomSecretInput.value.trim();
-            if (token) await refreshIceServers(token);
-
-            remoteLabel.textContent = targetName || targetId;
-            setStatus(`Calling ${targetName || targetId}...`);
+            remoteLabel.textContent = data.callerName || data.senderId;
             hangupBtn.disabled = false;
 
-            const peerConn = createPeerConnection(targetId);
-            const offer = await peerConn.createOffer();
-            await peerConn.setLocalDescription(offer);
+            const peerConn = createPeerConnection(data.senderId);
+            await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            const answer = await peerConn.createAnswer();
+            await peerConn.setLocalDescription(answer);
 
             ws.send(JSON.stringify({
-                type: 'offer',
-                targetId: targetId,
-                callerName: callerNameInput.value.trim() || 'Web Browser',
-                sdp: offer
+              type: 'answer',
+              targetId: data.senderId,
+              sdp: answer
             }));
-        }
+            break;
+          }
 
-        function endCallLocally() {
-            if (pc) {
-                pc.close();
-                pc = null;
+          case 'answer':
+            if (pc && data.sdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
             }
-            activeTargetId = null;
-            remoteVideo.srcObject = null;
-            remoteLabel.textContent = 'Remote Caller';
-            hangupBtn.disabled = true;
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                setStatus('Connected', 'connected');
+            break;
+
+          case 'ice-candidate':
+            if (pc && data.candidate) {
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
             }
-        }
-        function renderPeerList(peers) {
-            peerListEl.innerHTML = '';
-            const others = peers.filter(p => p.id !== myId);
-            if (others.length === 0) {
-                const empty = document.createElement('span');
-                empty.style.color = 'var(--muted)';
-                empty.style.fontSize = '0.9rem';
-                empty.textContent = 'No other family devices online right now.';
-                peerListEl.appendChild(empty);
-                return;
-            }
-            others.forEach(peer => {
-                const row = document.createElement('div');
-                row.className = 'peer-item';
-                // Use textContent (never innerHTML) to prevent XSS from device names
-                const label = document.createElement('span');
-                label.textContent = '${ peer.name } (${ peer.type })';
-            const btn = document.createElement('button');
-            btn.textContent = 'Call';
-            btn.onclick = () => callPeer(peer.id, peer.name);
-            row.appendChild(label);
-            row.appendChild(btn);
-            peerListEl.appendChild(row);
-        });
-}
-        async function connectSignaling() {
-            const name = callerNameInput.value.trim() || 'Family Web';
-            const token = roomSecretInput.value.trim();
-            if (!token) {
-                setStatus('Secret Required', 'error');
-                return;
-            }
-            localStorage.setItem('bisnan_caller_name', name);
-            localStorage.setItem('bisnan_room_secret', token);
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            if (ws) ws.close();
-            setStatus('Connecting...');
-            await refreshIceServers(token);
-            ws = new WebSocket('${ RENDER_WS_BASE } /? token = ${ encodeURIComponent(token) }');
-            ws.onopen = () => {
-                setStatus('Connected', 'connected');
-                ws.send(JSON.stringify({
-                    type: 'register-browser',
-                    name: name
-                }));
-            };
-            ws.onmessage = async (event) => {
-                const data = JSON.parse(event.data);
-                switch (data.type) {
-                    case 'registered':
-                        myId = data.id;
-                        break;
-                    case 'mesh-peer-list':
-                        renderPeerList(data.peers || []);
-                        break;
-                    case 'offer': {
-                        const accept = confirm('Incoming call from ' + (data.callerName || data.senderId) + '. Answer?');
-                        if (!accept) {
-                            ws.send(JSON.stringify({ type: 'call-decline', targetId: data.senderId }));
-                            return;
-                        }
-                        await startCamera();
-                        remoteLabel.textContent = data.callerName || data.senderId;
-                        hangupBtn.disabled = false;
-                        const peerConn = createPeerConnection(data.senderId);
-                        await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                        const answer = await peerConn.createAnswer();
-                        await peerConn.setLocalDescription(answer);
-                        ws.send(JSON.stringify({
-                            type: 'answer',
-                            targetId: data.senderId,
-                            sdp: answer
-                        }));
-                        break;
-                    }
-                    case 'answer':
-                        if (pc && data.sdp) {
-                            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                        }
-                        break;
-                    case 'ice-candidate':
-                        if (pc && data.candidate) {
-                            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                        }
-                        break;
-                    case 'call-decline':
-                        alert('Call was declined.');
-                        endCallLocally();
-                        break;
-                    case 'hangup':
-                        endCallLocally();
-                        break;
-                }
-            };
-            ws.onclose = (event) => {
-                endCallLocally();
-                if (event.code === 1006 || event.code === 4001) {
-                    setStatus('Disconnected (Check Secret or Session)', 'error');
-                } else {
-                    setStatus('Disconnected - Retrying...', 'error');
-                    reconnectTimer = setTimeout(connectSignaling, 4000);
-                }
-            };
-            ws.onerror = () => {
-                setStatus('Connection Error', 'error');
-            };
-        }
-        connectBtn.onclick = connectSignaling;
-        clearAuthBtn.onclick = () => {
-            localStorage.removeItem('bisnan_room_secret');
-            roomSecretInput.value = '';
-            if (ws) ws.close();
-            setStatus('Disconnected');
-        };
-        startCamBtn.onclick = startCamera;
-        toggleMicBtn.onclick = () => {
-            if (!localStream) return;
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (audioTrack) {
-                audioTrack.enabled = !audioTrack.enabled;
-                toggleMicBtn.textContent = audioTrack.enabled ? 'Mute Mic' : 'Unmute Mic';
-            }
-        };
-        toggleCamBtn.onclick = () => {
-            if (!localStream) return;
-            const videoTrack = localStream.getVideoTracks()[0];
-            if (videoTrack) {
-                videoTrack.enabled = !videoTrack.enabled;
-                toggleCamBtn.textContent = videoTrack.enabled ? 'Turn Off Video' : 'Turn On Video';
-            }
-        };
-        hangupBtn.onclick = () => {
-            if (ws && ws.readyState === WebSocket.OPEN && activeTargetId) {
-                ws.send(JSON.stringify({ type: 'hangup', targetId: activeTargetId }));
-            }
+            break;
+
+          case 'call-decline':
+            alert('Call was declined.');
             endCallLocally();
-        };
-        // Auto-connect on page load if secret was already saved
-        if (roomSecretInput.value.trim()) {
-            connectSignaling();
+            break;
+
+          case 'hangup':
+            endCallLocally();
+            break;
         }
+      };
+
+      ws.onclose = (event) => {
+        endCallLocally();
+        if (event.code === 1006 || event.code === 4001) {
+          setStatus('Disconnected (Check Secret or Session)', 'error');
+        } else {
+          setStatus('Disconnected - Retrying...', 'error');
+          reconnectTimer = setTimeout(connectSignaling, 4000);
+        }
+      };
+
+      ws.onerror = () => {
+        setStatus('Connection Error', 'error');
+      };
+    }
+
+    connectBtn.onclick = connectSignaling;
+
+    clearAuthBtn.onclick = () => {
+      localStorage.removeItem('bisnan_room_secret');
+      roomSecretInput.value = '';
+      if (ws) ws.close();
+      setStatus('Disconnected');
+    };
+
+    startCamBtn.onclick = startCamera;
+
+    toggleMicBtn.onclick = () => {
+      if (!localStream) return;
+      const audioTrack = localStream.getAudioTracks().at(0);
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        toggleMicBtn.textContent = audioTrack.enabled ? 'Mute Mic' : 'Unmute Mic';
+      }
+    };
+
+    toggleCamBtn.onclick = () => {
+      if (!localStream) return;
+      const videoTrack = localStream.getVideoTracks().at(0);
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        toggleCamBtn.textContent = videoTrack.enabled ? 'Turn Off Video' : 'Turn On Video';
+      }
+    };
+
+    hangupBtn.onclick = () => {
+      if (ws && ws.readyState === WebSocket.OPEN && activeTargetId) {
+        ws.send(JSON.stringify({ type: 'hangup', targetId: activeTargetId }));
+      }
+      endCallLocally();
+    };
+
+    if (roomSecretInput.value.trim()) {
+      connectSignaling();
+    }
+  </script>
+</body>
+</html>
