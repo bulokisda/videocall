@@ -7,10 +7,12 @@
     <!-- Strict Content Security Policy: blocks unauthorized scripts and restricts network calls to Render & Metered -->
     <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
+    img-src 'self' data:;
     script-src 'self' 'unsafe-inline';
     style-src 'self' 'unsafe-inline';
     connect-src 'self' wss://family-video-signaler.onrender.com https://family-video-signaler.onrender.com https://*.metered.live;
   " />
+    <link rel="icon" href="data:," />
     <title>Bisnan Calling</title>
     <style>
         :root {
@@ -184,7 +186,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Bisnan Calling Secure2</h1>
+            <h1>Bisnan Calling Secure8</h1>
             <span id="statusBadge" class="status-badge">Disconnected</span>
         </header>
 
@@ -236,6 +238,7 @@
 
     let ws = null;
     let pc = null;
+    let pendingCandidates = [];
     let localStream = null;
     let myId = null;
     let activeTargetId = null;
@@ -295,6 +298,7 @@
 
     function createPeerConnection(targetId) {
       if (pc) pc.close();
+      pendingCandidates = [];
       activeTargetId = targetId;
       pc = new RTCPeerConnection({ iceServers: cachedIceServers });
 
@@ -303,10 +307,13 @@
       }
 
       pc.ontrack = (event) => {
-        if (event.streams && event.streams.length > 0) {
-          remoteVideo.srcObject = event.streams.item(0);
+        const stream = event.streams ? event.streams.at(0) : null;
+        if (stream && remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
         }
       };
+
+
 
       pc.onicecandidate = (event) => {
         if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
@@ -435,40 +442,61 @@
             renderPeerList(data.peers || []);
             break;
 
-          case 'offer': {
-            const accept = confirm(`Incoming call from ${data.callerName || data.senderId}. Answer?`);
-            if (!accept) {
-              ws.send(JSON.stringify({ type: 'call-decline', targetId: data.senderId }));
-              return;
-            }
-            await startCamera();
-            remoteLabel.textContent = data.callerName || data.senderId;
-            hangupBtn.disabled = false;
+         case 'offer': {
+             const callerLabel = data.callerName || data.senderName || data.senderId;
+             const accept = confirm(`Incoming call from ${callerLabel}. Answer?`);
+             if (!accept) {
+               ws.send(JSON.stringify({ type: 'call-decline', targetId: data.senderId }));
+               return;
+             }
+             await startCamera();
+             remoteLabel.textContent = callerLabel;
+             hangupBtn.disabled = false;
+    
+             const peerConn = createPeerConnection(data.senderId);
+             const sdpInit = typeof data.sdp === 'string' ? { type: 'offer', sdp: data.sdp } : data.sdp;
+             await peerConn.setRemoteDescription(new RTCSessionDescription(sdpInit));
+    
+             // Drain any ICE candidates that arrived early
+             for (const cand of pendingCandidates) {
+               await peerConn.addIceCandidate(new RTCIceCandidate(cand));
+             }
+             pendingCandidates = [];
+    
+             const answer = await peerConn.createAnswer();
+             await peerConn.setLocalDescription(answer);
+    
+             ws.send(JSON.stringify({
+               type: 'answer',
+               targetId: data.senderId,
+               sdp: answer
+             }));
+             break;
+           }
 
-            const peerConn = createPeerConnection(data.senderId);
-            await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            const answer = await peerConn.createAnswer();
-            await peerConn.setLocalDescription(answer);
+           case 'answer':
+             if (pc && data.sdp) {
+               const answerInit = typeof data.sdp === 'string' ? { type: 'answer', sdp: data.sdp } : data.sdp;
+               await pc.setRemoteDescription(new RTCSessionDescription(answerInit));
+    
+               // Drain any ICE candidates that arrived early
+               for (const cand of pendingCandidates) {
+                 await pc.addIceCandidate(new RTCIceCandidate(cand));
+               }
+               pendingCandidates = [];
+             }
+             break;
 
-            ws.send(JSON.stringify({
-              type: 'answer',
-              targetId: data.senderId,
-              sdp: answer
-            }));
-            break;
-          }
+           case 'ice-candidate':
+             if (data.candidate) {
+               if (pc && pc.remoteDescription) {
+                 await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+               } else {
+                 pendingCandidates.push(data.candidate);
+               }
+             }
+             break;
 
-          case 'answer':
-            if (pc && data.sdp) {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            }
-            break;
-
-          case 'ice-candidate':
-            if (pc && data.candidate) {
-              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-            }
-            break;
 
           case 'call-decline':
             alert('Call was declined.');
@@ -496,7 +524,14 @@
       };
     }
 
+    window.addEventListener('beforeunload', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, 'Page unloaded');
+      }
+    });
+
     connectBtn.onclick = connectSignaling;
+
 
     clearAuthBtn.onclick = () => {
       localStorage.removeItem('bisnan_room_secret');

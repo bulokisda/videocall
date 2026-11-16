@@ -244,6 +244,17 @@ wss.on('connection', (ws) => {
                 case 'register-browser': {
                     const cleanName = sanitizeString(data.name);
                     const cleanId = sanitizeString(data.id, 64);
+                    if (cleanName) {
+                        clients.forEach((info, id) => {
+                            if (info.type === 'browser' && info.name === cleanName) {
+                                console.log(`Purging stale browser session for ${cleanName}: ${id}`);
+                                if (info.socket.readyState === WebSocket.OPEN) {
+                                    info.socket.close(4001, 'Replaced by newer session');
+                                }
+                                clients.delete(id);
+                            }
+                        });
+                    }
 
                     clients.forEach((info, id) => {
                         if (info.socket === ws) clients.delete(id);
