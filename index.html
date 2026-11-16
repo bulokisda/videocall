@@ -186,7 +186,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Bisnan Calling Secure6</h1>
+            <h1>Bisnan Calling Secure7</h1>
             <span id="statusBadge" class="status-badge">Disconnected</span>
         </header>
 
@@ -522,7 +522,14 @@
       };
     }
 
+    window.addEventListener('beforeunload', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, 'Page unloaded');
+      }
+    });
+
     connectBtn.onclick = connectSignaling;
+
 
     clearAuthBtn.onclick = () => {
       localStorage.removeItem('bisnan_room_secret');
