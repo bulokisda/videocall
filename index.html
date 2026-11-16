@@ -7,6 +7,7 @@
     <!-- Strict Content Security Policy: blocks unauthorized scripts and restricts network calls to Render & Metered -->
     <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
+    img-src 'self' data:;
     script-src 'self' 'unsafe-inline';
     style-src 'self' 'unsafe-inline';
     connect-src 'self' wss://family-video-signaler.onrender.com https://family-video-signaler.onrender.com https://*.metered.live;
@@ -185,7 +186,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Bisnan Calling Secure5</h1>
+            <h1>Bisnan Calling Secure6</h1>
             <span id="statusBadge" class="status-badge">Disconnected</span>
         </header>
 
