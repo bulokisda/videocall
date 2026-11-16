@@ -1,346 +1,509 @@
-const http = require('http');
-const https = require('https');
-const url = require('url');
-const crypto = require('crypto');
-const WebSocket = require('ws');
+<!DOCTYPE html>
+<html lang="en">
 
-const PORT = process.env.PORT || 8080;
-const FAMILY_SECRET = process.env.FAMILY_ROOM_SECRET;
-const METERED_DOMAIN = process.env.METERED_DOMAIN; // e.g., "bisnan.metered.live"
-const METERED_API_KEY = process.env.METERED_API_KEY;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://bulokisda.github.io';
-
-if (!FAMILY_SECRET) {
-    console.warn('WARNING: FAMILY_ROOM_SECRET is not set! All connections will be rejected until configured in Render Environment Variables.');
-}
-
-// Constant-time string comparison to prevent timing attacks on the secret token
-function isValidToken(providedToken) {
-    if (!FAMILY_SECRET || typeof providedToken !== 'string') return false;
-    const expectedBuf = Buffer.from(FAMILY_SECRET, 'utf8');
-    const providedBuf = Buffer.from(providedToken, 'utf8');
-    if (expectedBuf.length !== providedBuf.length) return false;
-    return crypto.timingSafeEqual(expectedBuf, providedBuf);
-}
-
-// Helper to fetch short-lived TURN credentials from Metered REST API
-function fetchMeteredIceServers() {
-    return new Promise((resolve, reject) => {
-        if (!METERED_DOMAIN || !METERED_API_KEY) {
-            return resolve([
-                { urls: 'stun:://google.com' },
-                { urls: 'stun:stun.relay.metered.ca:80' }
-            ]);
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Strict Content Security Policy: blocks unauthorized scripts and restricts network calls to Render & Metered -->
+    <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline';
+    connect-src 'self' wss://family-video-signaler.onrender.com https://family-video-signaler.onrender.com https://*.metered.live;
+  " />
+    <title>Bisnan Calling</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --text: #f8fafc;
+            --muted: #94a3b8;
         }
 
-        const apiUrl = `https://${METERED_DOMAIN}/api/v1/turn/credentials?apiKey=${encodeURIComponent(METERED_API_KEY)}`;
-        https.get(apiUrl, (res) => {
-            let rawData = '';
-            res.on('data', (chunk) => { rawData += chunk; });
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(rawData);
-                    if (Array.isArray(parsed)) {
-                        resolve(parsed);
-                    } else {
-                        reject(new Error('Unexpected Metered API response format'));
-                    }
-                } catch (err) {
-                    reject(err);
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.5rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .status-badge {
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            background: var(--card);
+            color: var(--muted);
+        }
+
+        .status-badge.connected {
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .status-badge.error {
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 1.25rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .auth-row,
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        input {
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: var(--text);
+            padding: 0.65rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            flex: 1;
+            min-width: 180px;
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.65rem 1.1rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.danger {
+            background: var(--danger);
+        }
+
+        button.secondary {
+            background: #334155;
+        }
+
+        .videos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+
+        .video-box {
+            position: relative;
+            background: #020617;
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 0.5rem;
+            left: 0.75rem;
+            background: rgba(15, 23, 42, 0.75);
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+
+        .peer-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            margin-top: 0.75rem;
+        }
+
+        .peer-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0f172a;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Bisnan Calling</h1>
+            <span id="statusBadge" class="status-badge">Disconnected</span>
+        </header>
+
+        <!-- Family Access Setup (Stored locally in browser, never hardcoded in GitHub) -->
+        <div class="card">
+            <div class="auth-row">
+                <input id="callerNameInput" type="text" placeholder="Your Name (e.g. Mom, Dad)" maxlength="30" />
+                <input id="roomSecretInput" type="password" placeholder="Family Room Secret" />
+                <button id="connectBtn">Save &amp; Connect</button>
+                <button id="clearAuthBtn" class="secondary" title="Clear saved secret">Reset</button>
+            </div>
+        </div>
+
+        <!-- Camera & Call Controls -->
+        <div class="card">
+            <div class="controls">
+                <button id="startCamBtn">Start Camera</button>
+                <button id="toggleMicBtn" class="secondary" disabled>Mute Mic</button>
+                <button id="toggleCamBtn" class="secondary" disabled>Turn Off Video</button>
+                <button id="hangupBtn" class="danger" disabled>Hang Up</button>
+            </div>
+        </div>
+
+        <!-- Video Streams -->
+        <div class="videos">
+            <div class="video-box">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <span class="video-label">You</span>
+            </div>
+            <div class="video-box">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <span id="remoteLabel" class="video-label">Remote Caller</span>
+            </div>
+        </div>
+
+        <!-- Online Family Devices -->
+        <div class="card">
+            <strong>Online Family Devices</strong>
+            <div id="peerList" class="peer-list">
+                <span style="color: var(--muted); font-size: 0.9rem;">Enter your name and Family Room Secret to see
+                    online devices.</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const RENDER_HTTP_BASE = 'https://family-video-signaler.onrender.com';
+        const RENDER_WS_BASE = 'wss://family-video-signaler.onrender.com';
+
+        let ws = null;
+        let pc = null;
+        let localStream = null;
+        let myId = null;
+        let activeTargetId = null;
+        let cachedIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+        let reconnectTimer = null;
+
+        const statusBadge = document.getElementById('statusBadge');
+        const callerNameInput = document.getElementById('callerNameInput');
+        const roomSecretInput = document.getElementById('roomSecretInput');
+        const connectBtn = document.getElementById('connectBtn');
+        const clearAuthBtn = document.getElementById('clearAuthBtn');
+        const startCamBtn = document.getElementById('startCamBtn');
+        const toggleMicBtn = document.getElementById('toggleMicBtn');
+        const toggleCamBtn = document.getElementById('toggleCamBtn');
+        const hangupBtn = document.getElementById('hangupBtn');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const remoteLabel = document.getElementById('remoteLabel');
+        const peerListEl = document.getElementById('peerList');
+
+        // Load saved credentials from localStorage
+        callerNameInput.value = localStorage.getItem('bisnan_caller_name') || '';
+        roomSecretInput.value = localStorage.getItem('bisnan_room_secret') || '';
+
+        function setStatus(text, state = '') {
+            statusBadge.textContent = text;
+            statusBadge.className = 'status-badge ' + state;
+        }
+
+        // Fetch temporary TURN servers dynamically from Render (keeps Metered API key hidden)
+        async function refreshIceServers(token) {
+            try {
+                const res = await fetch(`${RENDER_HTTP_BASE}/ice-servers?token=${encodeURIComponent(token)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+                    cachedIceServers = data.iceServers;
                 }
-            });
-        }).on('error', reject);
-    });
-}
-
-// HTTP Server handles health checks and authenticated /ice-servers requests
-const server = http.createServer(async (req, res) => {
-    const origin = req.headers.origin;
-
-    // Strict CORS headers
-    if (!origin || origin === ALLOWED_ORIGIN) {
-        res.setHeader('Access-Control-Allow-Origin', origin || ALLOWED_ORIGIN);
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    }
-
-    if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        return res.end();
-    }
-
-    const parsedUrl = url.parse(req.url, true);
-
-    // Health check endpoint for Render
-    if (req.method === 'GET' && parsedUrl.pathname === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    // Authenticated endpoint to fetch temporary TURN credentials
-    if (req.method === 'GET' && parsedUrl.pathname === '/ice-servers') {
-        if (origin && origin !== ALLOWED_ORIGIN) {
-            res.writeHead(403, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ error: 'Forbidden Origin' }));
+            } catch (err) {
+                console.warn('Could not fetch TURN servers, falling back to STUN:', err.message);
+            }
         }
 
-        if (!isValidToken(parsedUrl.query.token)) {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ error: 'Unauthorized' }));
+        async function startCamera() {
+            if (localStream) return localStream;
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                startCamBtn.textContent = 'Camera Active';
+                startCamBtn.disabled = true;
+                toggleMicBtn.disabled = false;
+                toggleCamBtn.disabled = false;
+                return localStream;
+            } catch (err) {
+                alert('Camera/Microphone permission is required: ' + err.message);
+                throw err;
+            }
         }
 
-        try {
-            const iceServers = await fetchMeteredIceServers();
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ iceServers }));
-        } catch (err) {
-            console.error('Failed to fetch Metered TURN credentials:', err.message);
-            res.writeHead(502, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ error: 'Failed to retrieve ICE servers' }));
-        }
-    }
+        function createPeerConnection(targetId) {
+            if (pc) pc.close();
+            activeTargetId = targetId;
+            pc = new RTCPeerConnection({ iceServers: cachedIceServers });
 
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not Found' }));
-});
-
-// WebSocket Server attached to the HTTP server with strict handshake verification
-const wss = new WebSocket.Server({
-    server,
-    maxPayload: 64 * 1024, // 64 KB max message size
-    verifyClient: (info, done) => {
-        const origin = info.origin;
-
-        // Browser clients send an Origin header; native Flutter clients do not
-        if (origin && origin !== ALLOWED_ORIGIN) {
-            console.warn(`Blocked unauthorized origin: ${origin}`);
-            return done(false, 403, 'Forbidden Origin');
-        }
-
-        const query = url.parse(info.req.url, true).query;
-        if (!isValidToken(query.token)) {
-            console.warn('Blocked unauthorized WebSocket handshake attempt');
-            return done(false, 401, 'Unauthorized');
-        }
-
-        done(true);
-    }
-});
-
-const clients = new Map();
-
-function sanitizeString(value, maxLen = 40) {
-    if (typeof value !== 'string') return null;
-    return value.trim().slice(0, maxLen).replace(/[<>]/g, '');
-}
-
-function broadcastPeerList() {
-    const peerList = Array.from(clients.entries()).map(([id, info]) => {
-        const fallbackId = id.includes('_') ? id.split('_')[1] : id.substring(0, 5);
-        const fallbackName = `${info.type.charAt(0).toUpperCase() + info.type.slice(1)} (${fallbackId})`;
-
-        return {
-            id: id,
-            type: info.type,
-            name: info.name || fallbackName
-        };
-    });
-
-    const payload = JSON.stringify({
-        type: 'mesh-peer-list',
-        peers: peerList
-    });
-
-    clients.forEach((info) => {
-        if (info.socket.readyState === WebSocket.OPEN) {
-            info.socket.send(payload);
-        }
-    });
-}
-
-// Periodic cleanup of dead sockets every 5 seconds
-setInterval(() => {
-    let changed = false;
-    clients.forEach((info, id) => {
-        if (info.socket.readyState !== WebSocket.OPEN) {
-            console.log(`Sweeping dead socket from memory registry: ${id}`);
-            clients.delete(id);
-            changed = true;
-        }
-    });
-    if (changed) broadcastPeerList();
-}, 5000);
-
-wss.on('connection', (ws) => {
-    let clientId = null;
-    let messageCount = 0;
-    let rateWindowStart = Date.now();
-
-    ws.on('message', (message) => {
-        // Basic rate limiter: max 120 messages per 10 seconds per socket (accommodates ICE candidate bursts)
-        const now = Date.now();
-        if (now - rateWindowStart > 10000) {
-            rateWindowStart = now;
-            messageCount = 0;
-        }
-        messageCount++;
-        if (messageCount > 120) {
-            console.warn(`Rate limit exceeded by ${clientId || 'unregistered socket'}, closing.`);
-            ws.close(1008, 'Rate limit exceeded');
-            return;
-        }
-
-        try {
-            const data = JSON.parse(message);
-            if (!data || typeof data.type !== 'string') return;
-
-            if (data.type !== 'ping') {
-                // Avoid logging full SDP/ICE payloads in production logs
-                console.log(`Signal [${data.type}] from ${clientId || 'unregistered'}`);
+            if (localStream) {
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
             }
 
-            switch (data.type) {
-                case 'register-tablet': {
-                    const cleanName = sanitizeString(data.name);
-                    const cleanId = sanitizeString(data.id, 64);
-
-                    let existingDeviceName = cleanName;
-                    clients.forEach((info, id) => {
-                        if (info.socket === ws && info.name) {
-                            existingDeviceName = info.name;
-                        }
-                        if (info.socket === ws) {
-                            clients.delete(id);
-                        }
-                    });
-
-                    clientId = cleanId || 'tablet_' + crypto.randomBytes(3).toString('hex');
-                    const dynamicPersistedName = cleanName || existingDeviceName;
-
-                    if (dynamicPersistedName) {
-                        clients.forEach((info, id) => {
-                            if (info.type === 'tablet' && info.name === dynamicPersistedName) {
-                                console.log(`Purging stale network session for ${dynamicPersistedName}: ${id}`);
-                                if (info.socket.readyState === WebSocket.OPEN) {
-                                    info.socket.close(4001, 'Replaced by newer session');
-                                }
-                                clients.delete(id);
-                            }
-                        });
-                    }
-
-                    clients.set(clientId, {
-                        socket: ws,
-                        type: 'tablet',
-                        name: dynamicPersistedName
-                    });
-
-                    console.log(`Android Node Registered: ${clientId} - Name: ${dynamicPersistedName || 'None'}`);
-                    ws.send(JSON.stringify({ type: 'registered', id: clientId }));
-                    broadcastPeerList();
-                    break;
+            pc.ontrack = (event) => {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
                 }
+            };
 
-                case 'register-browser': {
-                    const cleanName = sanitizeString(data.name);
-                    const cleanId = sanitizeString(data.id, 64);
-
-                    clients.forEach((info, id) => {
-                        if (info.socket === ws) clients.delete(id);
-                    });
-
-                    if (cleanId && clients.has(cleanId)) {
-                        console.log(`Purging stale socket reference for existing node session: ${cleanId}`);
-                        const old = clients.get(cleanId);
-                        if (old && old.socket.readyState === WebSocket.OPEN) {
-                            old.socket.close(4001, 'Replaced by newer session');
-                        }
-
-                        clients.delete(cleanId);
-                    }
-                    clientId = cleanId || 'browser_' + crypto.randomBytes(3).toString('hex');
-                    clients.set(clientId, {
-                        socket: ws,
-                        type: 'browser',
-                        name: cleanName
-                    });
-                    console.log('Web Browser Node Registered: ${ clientId }');
-                    ws.send(JSON.stringify({ type: 'registered', id: clientId }));
-                    broadcastPeerList();
-                    break;
+            pc.onicecandidate = (event) => {
+                if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        targetId: activeTargetId,
+                        candidate: event.candidate
+                    }));
                 }
-                case 'offer':
-                case 'answer':
-                case 'ice-candidate':
-                case 'call-decline': {
-                    // Reject signaling messages from sockets that haven't registered yet
-                    if (!clientId) return;
-                    data.senderId = clientId;
-                    const targetId = sanitizeString(data.targetId, 64);
-                    if (!targetId) break;
-                    const targetClient = clients.get(targetId);
-                    if (targetClient && targetClient.socket.readyState === WebSocket.OPEN) {
-                        targetClient.socket.send(JSON.stringify(data));
-                    }
-                    break;
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'connected') {
+                    setStatus('In Call', 'connected');
+                    hangupBtn.disabled = false;
+                } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+                    endCallLocally();
                 }
-                case 'hangup': {
-                    if (!clientId) return;
-                    if (data.targetId) {
-                        const targetId = sanitizeString(data.targetId, 64);
-                        const target = clients.get(targetId);
-                        if (target && target.socket.readyState === WebSocket.OPEN) {
-                            target.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
-                        }
-                    } else {
-                        console.log(`Node explicitly requested global room teardown: ${ clientId }`);
-                        clients.delete(clientId);
-                        clients.forEach((info) => {
-                            if (info.socket.readyState === WebSocket.OPEN) {
-                                info.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
-                            }
-                        });
-                    }
-                    broadcastPeerList();
-                    break;
-                }
-                case 'ping': {
-                    const cleanId = sanitizeString(data.id, 64);
-                    const cleanName = sanitizeString(data.name);
-                    if (cleanId && !clients.has(cleanId)) {
-                        clientId = cleanId;
-                        clients.set(clientId, {
-                            socket: ws,
-                            type: 'tablet',
-                            name: cleanName
-                        });
-                        console.log(`Self - healed node registration from ping: ${ clientId } - Name: ${ cleanName || 'None' }`);
-    ws.send(JSON.stringify({ type: 'registered', id: clientId }));
-    broadcastPeerList();
-}
-if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'pong' }));
-}
-break;
-}
-}
-} catch (e) {
-    console.error('Signaling error:', e.message);
-}
-});
-ws.on('close', () => {
-    if (clientId && clients.get(clientId)?.socket === ws) {
-        console.log(`Connection dropped by client layout layer: ${ clientId }`);
-        clients.delete(clientId);
-        clients.forEach((info) => {
-            if (info.socket.readyState === WebSocket.OPEN) {
-                info.socket.send(JSON.stringify({ type: 'hangup', senderId: clientId }));
+            };
+
+            return pc;
+        }
+
+        async function callPeer(targetId, targetName) {
+            await startCamera();
+            const token = roomSecretInput.value.trim();
+            if (token) await refreshIceServers(token);
+
+            remoteLabel.textContent = targetName || targetId;
+            setStatus(`Calling ${targetName || targetId}...`);
+            hangupBtn.disabled = false;
+
+            const peerConn = createPeerConnection(targetId);
+            const offer = await peerConn.createOffer();
+            await peerConn.setLocalDescription(offer);
+
+            ws.send(JSON.stringify({
+                type: 'offer',
+                targetId: targetId,
+                callerName: callerNameInput.value.trim() || 'Web Browser',
+                sdp: offer
+            }));
+        }
+
+        function endCallLocally() {
+            if (pc) {
+                pc.close();
+                pc = null;
             }
+            activeTargetId = null;
+            remoteVideo.srcObject = null;
+            remoteLabel.textContent = 'Remote Caller';
+            hangupBtn.disabled = true;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                setStatus('Connected', 'connected');
+            }
+        }
+        function renderPeerList(peers) {
+            peerListEl.innerHTML = '';
+            const others = peers.filter(p => p.id !== myId);
+            if (others.length === 0) {
+                const empty = document.createElement('span');
+                empty.style.color = 'var(--muted)';
+                empty.style.fontSize = '0.9rem';
+                empty.textContent = 'No other family devices online right now.';
+                peerListEl.appendChild(empty);
+                return;
+            }
+            others.forEach(peer => {
+                const row = document.createElement('div');
+                row.className = 'peer-item';
+                // Use textContent (never innerHTML) to prevent XSS from device names
+                const label = document.createElement('span');
+                label.textContent = '${ peer.name } (${ peer.type })';
+            const btn = document.createElement('button');
+            btn.textContent = 'Call';
+            btn.onclick = () => callPeer(peer.id, peer.name);
+            row.appendChild(label);
+            row.appendChild(btn);
+            peerListEl.appendChild(row);
         });
-        broadcastPeerList();
-    }
-});
-});
-server.listen(PORT, () => {
-    console.log(`Secured Manual Mesh Signaling Engine active on port ${ PORT }...`);
-});
+}
+        async function connectSignaling() {
+            const name = callerNameInput.value.trim() || 'Family Web';
+            const token = roomSecretInput.value.trim();
+            if (!token) {
+                setStatus('Secret Required', 'error');
+                return;
+            }
+            localStorage.setItem('bisnan_caller_name', name);
+            localStorage.setItem('bisnan_room_secret', token);
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            if (ws) ws.close();
+            setStatus('Connecting...');
+            await refreshIceServers(token);
+            ws = new WebSocket('${ RENDER_WS_BASE } /? token = ${ encodeURIComponent(token) }');
+            ws.onopen = () => {
+                setStatus('Connected', 'connected');
+                ws.send(JSON.stringify({
+                    type: 'register-browser',
+                    name: name
+                }));
+            };
+            ws.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                switch (data.type) {
+                    case 'registered':
+                        myId = data.id;
+                        break;
+                    case 'mesh-peer-list':
+                        renderPeerList(data.peers || []);
+                        break;
+                    case 'offer': {
+                        const accept = confirm('Incoming call from ' + (data.callerName || data.senderId) + '. Answer?');
+                        if (!accept) {
+                            ws.send(JSON.stringify({ type: 'call-decline', targetId: data.senderId }));
+                            return;
+                        }
+                        await startCamera();
+                        remoteLabel.textContent = data.callerName || data.senderId;
+                        hangupBtn.disabled = false;
+                        const peerConn = createPeerConnection(data.senderId);
+                        await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        const answer = await peerConn.createAnswer();
+                        await peerConn.setLocalDescription(answer);
+                        ws.send(JSON.stringify({
+                            type: 'answer',
+                            targetId: data.senderId,
+                            sdp: answer
+                        }));
+                        break;
+                    }
+                    case 'answer':
+                        if (pc && data.sdp) {
+                            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        }
+                        break;
+                    case 'ice-candidate':
+                        if (pc && data.candidate) {
+                            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        }
+                        break;
+                    case 'call-decline':
+                        alert('Call was declined.');
+                        endCallLocally();
+                        break;
+                    case 'hangup':
+                        endCallLocally();
+                        break;
+                }
+            };
+            ws.onclose = (event) => {
+                endCallLocally();
+                if (event.code === 1006 || event.code === 4001) {
+                    setStatus('Disconnected (Check Secret or Session)', 'error');
+                } else {
+                    setStatus('Disconnected - Retrying...', 'error');
+                    reconnectTimer = setTimeout(connectSignaling, 4000);
+                }
+            };
+            ws.onerror = () => {
+                setStatus('Connection Error', 'error');
+            };
+        }
+        connectBtn.onclick = connectSignaling;
+        clearAuthBtn.onclick = () => {
+            localStorage.removeItem('bisnan_room_secret');
+            roomSecretInput.value = '';
+            if (ws) ws.close();
+            setStatus('Disconnected');
+        };
+        startCamBtn.onclick = startCamera;
+        toggleMicBtn.onclick = () => {
+            if (!localStream) return;
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                toggleMicBtn.textContent = audioTrack.enabled ? 'Mute Mic' : 'Unmute Mic';
+            }
+        };
+        toggleCamBtn.onclick = () => {
+            if (!localStream) return;
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                toggleCamBtn.textContent = videoTrack.enabled ? 'Turn Off Video' : 'Turn On Video';
+            }
+        };
+        hangupBtn.onclick = () => {
+            if (ws && ws.readyState === WebSocket.OPEN && activeTargetId) {
+                ws.send(JSON.stringify({ type: 'hangup', targetId: activeTargetId }));
+            }
+            endCallLocally();
+        };
+        // Auto-connect on page load if secret was already saved
+        if (roomSecretInput.value.trim()) {
+            connectSignaling();
+        }
