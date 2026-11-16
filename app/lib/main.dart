@@ -1,5 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
+import 'dart:ui';
+
+import 'package:flutter_callkit_incoming/entities/call_event.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
 import 'package:call/username_setup_screen.dart';
 import 'package:flutter/material.dart';
@@ -11,10 +16,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'background_handler.dart';
 import 'video_call_screen.dart';
 
-const String appReleaseTag = "v1.0.4";
+const String appReleaseTag = "v1.0.6";
 
 String? savedUsername;
+String? savedRoomSecret;
+final StreamController<String> globalSignalStream =
+    StreamController<String>.broadcast();
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final Map<String, List<Map<String, dynamic>>> globalPendingCandidates = {};
 
 @pragma('vm:entry-point')
 void ntp(NotificationResponse response) {
@@ -24,46 +34,7 @@ void ntp(NotificationResponse response) {
 void minimizeAppToSystemTray() {
   const platform = MethodChannel('flutter/platform');
   platform.invokeMethod('SystemNavigator.pop');
-  // Note: Using SystemNavigator.pop within a custom async microtask block
-  // AFTER updating state prevents cutting off the active isolate runtime loop.
 }
-
-// @pragma('vm:entry-point')
-// void notificationTapBackground(NotificationResponse response) {
-//   // Handle background event execution
-//   print('XXX main Background notification response: $response');
-//   if (response.actionId == 'decline_call') {
-//     final localizedPlugin = FlutterLocalNotificationsPlugin();
-
-//     localizedPlugin
-//         .show(
-//           100,
-//           'Call Declined',
-//           '',
-//           const NotificationDetails(
-//             android: AndroidNotificationDetails(
-//               'incoming_call_channel',
-//               'Incoming Video Calls',
-//               importance: Importance.min,
-//               priority: Priority.low,
-//               ongoing: false,
-//             ),
-//           ),
-//         )
-//         .then((_) {
-//           localizedPlugin.cancel(100);
-//         });
-
-//     FlutterBackgroundService().invoke('notificationAction', {
-//       'action': 'decline',
-//     });
-//   } else if (response.actionId == 'accept_call') {
-//     print('XXX main notificationTapBackgroundHandler: accept_call');
-//     FlutterBackgroundService().invoke('notificationAction', {
-//       'action': 'accept',
-//     });
-//   }
-// }
 
 @pragma('vm:entry-point')
 void main() async {
@@ -71,9 +42,23 @@ void main() async {
 
   final SharedPreferences prefs = await SharedPreferences.getInstance();
   savedUsername = prefs.getString('saved_username');
+  savedRoomSecret = prefs.getString('family_room_secret');
 
-  // 🟢 CallKit hooks its native event streams across background triggers natively.
-  // We can start the application structure instantly.
+  FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
+    if (event == null) return;
+    if (event.event == Event.ACTION_CALL_DECLINE ||
+        event.event == Event.ACTION_CALL_TIMEOUT) {
+      final body = event.body is Map
+          ? Map<String, dynamic>.from(event.body)
+          : {};
+      final callerId = body['id']?.toString();
+      FlutterBackgroundService().invoke('notificationAction', {
+        'action': 'decline',
+        'targetId': callerId,
+      });
+    }
+  });
+
   runApp(const MyApp());
 
   scheduleMicrotask(() async {
@@ -86,12 +71,18 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool needsSetup =
+        savedUsername == null ||
+        savedUsername!.isEmpty ||
+        savedRoomSecret == null ||
+        savedRoomSecret!.isEmpty;
+
     return MaterialApp(
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Bisnan Calling',
       theme: ThemeData(brightness: Brightness.dark),
-      initialRoute: savedUsername == null ? '/username' : '/',
+      initialRoute: needsSetup ? '/username' : '/',
       routes: {
         '/': (context) => const HomeScreen(),
         '/call': (context) => const VideoCallScreen(),
@@ -108,35 +99,50 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isOnline = false;
-  bool _isReconnecting = false; // Tracks manual reconnect button spinning state
+  bool _isReconnecting = false;
   StreamSubscription? _serviceSubscription;
   List<dynamic> _discoveredNetworkPeers = [];
   String? _myRegisteredId;
   bool _isProcessingNavigationLock = false;
+  ReceivePort? _uiReceivePort;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _serviceSubscription?.cancel();
     _bindCommunicationChannel();
-
-    // 🟢 FIXED: Instead of a generic delayed status check, look up status safely
-    FlutterBackgroundService().isRunning().then((running) {
-      if (running) {
-        FlutterBackgroundService().invoke('checkStatus');
-      }
-    });
+    _syncBackgroundStatus();
   }
 
-  // void _triggerStatusCheck() {
-  //   Future.delayed(const Duration(milliseconds: 1000), () {
-  //     FlutterBackgroundService().invoke('checkStatus');
-  //   });
-  // }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _syncBackgroundStatus();
+    }
+  }
 
-  //  CLEAN FIXED VERSION:
+  Future<void> _syncBackgroundStatus() async {
+    for (int i = 0; i < 4; i++) {
+      if (!mounted || _isOnline) return;
+      try {
+        FlutterBackgroundService().invoke('checkStatus');
+      } catch (e) {
+        debugPrint("checkStatus invoke error: $e");
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    // If UI engine was recreated by Android and the old channel detached, re-attach cleanly
+    if (mounted && !_isOnline) {
+      _serviceSubscription?.cancel();
+      _bindCommunicationChannel();
+      FlutterBackgroundService().invoke('reconnect');
+    }
+  }
+
   Future<void> _handleManualReconnect() async {
     if (_isReconnecting) return;
 
@@ -151,7 +157,6 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint("--> Reconnect failed to dispatch: $e");
     }
 
-    // Give visual spinner effect time to resolve network loopback
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) {
       setState(() {
@@ -161,114 +166,149 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _bindCommunicationChannel() {
-    _serviceSubscription = FlutterBackgroundService().on('onSignalReceived').listen((
-      event,
-    ) {
-      // print('XXX event received: $event');
-      if (event == null || event['data'] == null) return;
-      var data = jsonDecode(event['data']);
-
-      if (data['type'] == 'network-offline') {
-        if (mounted) {
-          setState(() {
-            _isOnline = false;
-            _discoveredNetworkPeers = []; // Purge peer views
-            _isProcessingNavigationLock =
-                false; // 🟢 Reset navigation flag block
-          });
-        }
-        return;
-      }
-
-      // Any valid signal payload implies the socket service pipeline is running online
-      if (!_isOnline || _isReconnecting) {
-        setState(() {
-          _isOnline = true;
-          _isReconnecting = false;
-        });
-      }
-
-      if (data['type'] == 'registered') {
-        if (mounted) {
-          setState(() {
-            _myRegisteredId = data['id'];
-          });
-          debugPrint(
-            "--> UI Isolate successfully captured its own ID: $_myRegisteredId",
-          );
-        }
-      }
-
-      // 🟢 Fix: Reset navigation filters immediately if a hangup/clear payload arrives
-      if (data['type'] == 'hangup') {
-        if (mounted) {
-          setState(() {
-            _isProcessingNavigationLock = false;
-          });
-        }
-        return;
-      }
-
-      // 🚨 Change this specific block to check if an active call is already running
-      if (data['type'] == 'accept-from-notification') {
-        debugPrint("--> UI Isolate captured notification answer tap.");
-
-        if (mounted && !_isProcessingNavigationLock) {
-          _isProcessingNavigationLock = true;
-
-          final sdpPayload = data['sdp'];
-          final senderIdPayload = data['senderId'] ?? 'browser_node';
-
-          Navigator.pushNamed(
-            context,
-            '/call',
-            arguments: {
-              'sdp': sdpPayload,
-              'senderId': senderIdPayload,
-              'myRegisteredId':
-                  _myRegisteredId ?? data['targetId'] ?? 'unknown_tablet',
-            },
-          ).then((_) {
-            if (mounted) {
-              setState(() {
-                _isProcessingNavigationLock = false;
-              });
-            }
-          });
-        }
-        return;
-      }
-
-      if (data['type'] == 'mesh-peer-list') {
-        if (mounted) {
-          setState(() {
-            _discoveredNetworkPeers = data['peers'] ?? [];
-          });
-          debugPrint(
-            "--> UI Rebuilt! Found ${_discoveredNetworkPeers.length} total raw nodes.",
-          );
-        }
+    // 1. Direct native Dart port (survives Activity destroy/recreate 100% of the time)
+    IsolateNameServer.removePortNameMapping(BackgroundEngineState.uiPortName);
+    _uiReceivePort = ReceivePort();
+    IsolateNameServer.registerPortWithName(
+      _uiReceivePort!.sendPort,
+      BackgroundEngineState.uiPortName,
+    );
+    _uiReceivePort!.listen((message) {
+      if (message is String) {
+        _handleIncomingSignal(message);
       }
     });
+
+    // 2. Standard flutter_background_service channel
+    _serviceSubscription = FlutterBackgroundService()
+        .on('onSignalReceived')
+        .listen((event) {
+          if (event == null || event['data'] == null) return;
+          _handleIncomingSignal(event['data'] as String);
+        });
+  }
+
+  void _handleIncomingSignal(String rawJson) {
+    if (!globalSignalStream.isClosed) {
+      globalSignalStream.add(rawJson);
+    }
+    if (!mounted) return;
+    var data = jsonDecode(rawJson);
+
+    if (data['type'] == 'ice-candidate' && data['senderId'] != null) {
+      if (!VideoCallScreen.isActive) {
+        globalPendingCandidates
+            .putIfAbsent(data['senderId'].toString(), () => [])
+            .add(Map<String, dynamic>.from(data));
+      }
+    }
+
+    if (data['type'] == 'network-offline') {
+      setState(() {
+        _isOnline = false;
+        _discoveredNetworkPeers = [];
+        _isProcessingNavigationLock = false;
+      });
+      return;
+    }
+
+    if (!_isOnline || _isReconnecting) {
+      setState(() {
+        _isOnline = true;
+        _isReconnecting = false;
+      });
+    }
+
+    if (data['type'] == 'registered') {
+      setState(() {
+        _myRegisteredId = data['id'];
+      });
+      debugPrint(
+        "--> UI Isolate successfully captured its own ID: $_myRegisteredId",
+      );
+    }
+
+    if (data['type'] == 'hangup') {
+      setState(() {
+        _isProcessingNavigationLock = false;
+      });
+      return;
+    }
+
+    if (data['type'] == 'accept-from-notification') {
+      debugPrint("--> UI Isolate captured notification answer tap.");
+
+      if (!_isProcessingNavigationLock) {
+        _isProcessingNavigationLock = true;
+
+        final sdpPayload = data['sdp'];
+        final senderIdPayload = data['senderId'] ?? 'browser_node';
+
+        Navigator.pushNamed(
+          context,
+          '/call',
+          arguments: {
+            'sdp': sdpPayload,
+            'senderId': senderIdPayload,
+            'myRegisteredId':
+                _myRegisteredId ?? data['targetId'] ?? 'unknown_tablet',
+          },
+        ).then((res) {
+          if (mounted) {
+            setState(() {
+              _isProcessingNavigationLock = false;
+            });
+          }
+        });
+      }
+      return;
+    }
+
+    if (data['type'] == 'mesh-peer-list') {
+      setState(() {
+        _discoveredNetworkPeers = data['peers'] ?? [];
+      });
+      debugPrint(
+        "--> UI Rebuilt! Found ${_discoveredNetworkPeers.length} total raw nodes.",
+      );
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    IsolateNameServer.removePortNameMapping(BackgroundEngineState.uiPortName);
+    _uiReceivePort?.close();
     _serviceSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final seenNames = <String>{};
     final activeCallTargets = _discoveredNetworkPeers.where((peer) {
-      if (_myRegisteredId != null) {
-        return peer['id'] != _myRegisteredId;
-      }
+      final id = peer['id']?.toString();
+      final name = peer['name']?.toString() ?? id ?? 'Unknown';
+      if (_myRegisteredId != null && id == _myRegisteredId) return false;
+      if (seenNames.contains(name)) return false;
+      seenNames.add(name);
       return true;
     }).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Bisnan Video Call"), centerTitle: true),
+      appBar: AppBar(
+        title: const Text("Bisnan Video Call"),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Change Name or Secret',
+            onPressed: () {
+              Navigator.pushNamed(context, '/username');
+            },
+          ),
+        ],
+      ),
       bottomNavigationBar: const Padding(
         padding: EdgeInsets.only(bottom: 12.0),
         child: Text(
@@ -289,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          _isOnline ? "🥱" : "🚫",
+                          _isOnline ? "🟢" : "🔴",
                           style: const TextStyle(fontSize: 60),
                         ),
                         const SizedBox(height: 16),
@@ -300,7 +340,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             fontSize: 16,
                           ),
                         ),
-                        // Display the dynamic action button if connection is lost/offline
                         if (!_isOnline) ...[
                           const SizedBox(height: 24),
                           _isReconnecting
@@ -342,7 +381,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 backgroundColor: Colors.green.shade600,
                                 foregroundColor: Colors.white,
                                 elevation: 6,
-                                shadowColor: Colors.greenAccent.withValues(alpha: 0.4),
+                                shadowColor: Colors.greenAccent.withValues(
+                                  alpha: 0.4,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(20),
                                 ),
@@ -370,10 +411,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         );
                       },
-
-                    
-                    
-                    
                     ),
                   ),
           ],
