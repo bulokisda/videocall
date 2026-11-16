@@ -184,7 +184,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Bisnan Calling</h1>
+            <h1>Bisnan Calling Secure</h1>
             <span id="statusBadge" class="status-badge">Disconnected</span>
         </header>
 
