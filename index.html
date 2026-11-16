@@ -186,7 +186,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Bisnan Calling Secure7</h1>
+            <h1>Bisnan Calling Secure8</h1>
             <span id="statusBadge" class="status-badge">Disconnected</span>
         </header>
 
@@ -307,10 +307,12 @@
       }
 
       pc.ontrack = (event) => {
-        if (event.streams && event.streams.length > 0) {
-          remoteVideo.srcObject = event.streams[0];
+        const stream = event.streams ? event.streams.at(0) : null;
+        if (stream && remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
         }
       };
+
 
 
       pc.onicecandidate = (event) => {
