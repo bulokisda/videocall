@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 8080;
 const FAMILY_SECRET = process.env.FAMILY_ROOM_SECRET;
 const METERED_DOMAIN = process.env.METERED_DOMAIN; // e.g., "bisnan.metered.live"
 const METERED_API_KEY = process.env.METERED_API_KEY;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://bulokisda.github.io/videocall/';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://bulokisda.github.io';
 
 if (!FAMILY_SECRET) {
     console.warn('WARNING: FAMILY_ROOM_SECRET is not set! All connections will be rejected until configured in Render Environment Variables.');
