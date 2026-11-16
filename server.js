@@ -264,7 +264,7 @@ wss.on('connection', (ws) => {
                         type: 'browser',
                         name: cleanName
                     });
-                    console.log('Web Browser Node Registered: ${ clientId }');
+                    console.log(`Web Browser Node Registered: ${ clientId }`);
                     ws.send(JSON.stringify({ type: 'registered', id: clientId }));
                     broadcastPeerList();
                     break;
