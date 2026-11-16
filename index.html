@@ -1,481 +1,509 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Strict Content Security Policy: blocks unauthorized scripts and restricts network calls to Render & Metered -->
+    <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline';
+    connect-src 'self' wss://family-video-signaler.onrender.com https://family-video-signaler.onrender.com https://*.metered.live;
+  " />
     <title>Bisnan Calling</title>
     <style>
-        body { font-family: sans-serif; background: #222; color: #fff; padding: 20px; }
-        .peer-row { margin: 10px 0; padding: 10px; background: #333; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
-        button { padding: 6px 12px; background: #4CAF50; border: none; color: white; border-radius: 4px; cursor: pointer; }
-        button.hangup-btn { background: #f44336; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        #videoGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
-        .video-box { position: relative; background: #000; border-radius: 8px; overflow: hidden; height: 200px; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .peer-label { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 4px; }
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.5rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .status-badge {
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            background: var(--card);
+            color: var(--muted);
+        }
+
+        .status-badge.connected {
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .status-badge.error {
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 1.25rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .auth-row,
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        input {
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: var(--text);
+            padding: 0.65rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            flex: 1;
+            min-width: 180px;
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.65rem 1.1rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.danger {
+            background: var(--danger);
+        }
+
+        button.secondary {
+            background: #334155;
+        }
+
+        .videos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+
+        .video-box {
+            position: relative;
+            background: #020617;
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 0.5rem;
+            left: 0.75rem;
+            background: rgba(15, 23, 42, 0.75);
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+
+        .peer-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            margin-top: 0.75rem;
+        }
+
+        .peer-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0f172a;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+        }
     </style>
 </head>
-<body style="display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0;"> 
-    <button id="mediaToggleBtn" onclick="toggleLocalMedia()" style="display: flex; align-items: center; justify-content: center;">Start Camera</button> 
-    <br>  
-    <div style="width: 120px; height: 120px; background: #000; border: 2px solid coral; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center;"> 
-        <video id="localVideo" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video> 
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Bisnan Calling Secure</h1>
+            <span id="statusBadge" class="status-badge">Disconnected</span>
+        </header>
+
+        <!-- Family Access Setup (Stored locally in browser, never hardcoded in GitHub) -->
+        <div class="card">
+            <div class="auth-row">
+                <input id="callerNameInput" type="text" placeholder="Your Name (e.g. Mom, Dad)" maxlength="30" />
+                <input id="roomSecretInput" type="password" placeholder="Family Room Secret" />
+                <button id="connectBtn">Save &amp; Connect</button>
+                <button id="clearAuthBtn" class="secondary" title="Clear saved secret">Reset</button>
+            </div>
+        </div>
+
+        <!-- Camera & Call Controls -->
+        <div class="card">
+            <div class="controls">
+                <button id="startCamBtn">Start Camera</button>
+                <button id="toggleMicBtn" class="secondary" disabled>Mute Mic</button>
+                <button id="toggleCamBtn" class="secondary" disabled>Turn Off Video</button>
+                <button id="hangupBtn" class="danger" disabled>Hang Up</button>
+            </div>
+        </div>
+
+        <!-- Video Streams -->
+        <div class="videos">
+            <div class="video-box">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <span class="video-label">You</span>
+            </div>
+            <div class="video-box">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <span id="remoteLabel" class="video-label">Remote Caller</span>
+            </div>
+        </div>
+
+        <!-- Online Family Devices -->
+        <div class="card">
+            <strong>Online Family Devices</strong>
+            <div id="peerList" class="peer-list">
+                <span style="color: var(--muted); font-size: 0.9rem;">Enter your name and Family Room Secret to see
+                    online devices.</span>
+            </div>
+        </div>
     </div>
-    <br> 
-    <div id="peerListContainer" style="display: flex; align-items: center; justify-content: center;"> </div> 
-    <div id="videoGrid" style="border: 2px solid coral; border-radius: 8px; display: flex; align-items: center; justify-content: center;"></div> 
-    <div style="display: flex; align-items: center; justify-content: center;"><span id="myIdDisplay" style="color: #ff9800; font-weight: bold;">Connecting...</span></div>
 
     <script>
-        // Update this block inside your index.html file:
-        const rtcConfig = { 
-          iceServers: [
-              // 1. CELLULAR TRAVERSAL: Standard UDP over Port 443
-              {
-                urls: "turn:standard.relay.metered.ca:443",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um"
-              },
-        
-              // 2. RESTRICTED WI-FI TRAVERSAL: Secure TLS over Port 443 (TCP)
-              {
-                urls: "turns:standard.relay.metered.ca:443?transport=tcp",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um",
-                relayProtocol: "tcp"
-              },
-              
-              // 3. BASE PUBLIC LOOKUP: Google STUN for open networks
-              { 
-                urls: "stun:stun.relay.metered.ca:80" 
-              },
-        
-              // 4. FALLBACK: Standard TCP over Port 80
-              {
-                urls: "turn:standard.relay.metered.ca:80?transport=tcp",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um",
-                relayProtocol: "tcp"
-              },
-        
-              // 5. FALLBACK: Standard UDP over Port 80
-              {
-                urls: "turn:standard.relay.metered.ca:80",
-                username: "801acfb381f1738ba4e9e792",
-                credential: "xb8Y+/nANmaFf1Um"
-              }
-          ]
-        };
+        const RENDER_HTTP_BASE = 'https://family-video-signaler.onrender.com';
+        const RENDER_WS_BASE = 'wss://family-video-signaler.onrender.com';
 
         let ws = null;
+        let pc = null;
         let localStream = null;
         let myId = null;
-        let isMediaActive = false;
-        const peerConnections = new Map();
-        const iceQueues = new Map(); // Global holding queue for early ICE candidates
+        let activeTargetId = null;
+        let cachedIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+        let reconnectTimer = null;
 
-        // 1. ROBUST RECONNECTING WEBSOCKET WRAPPER
-        function connectSignalingServer() {
-            console.log("Establishing connection to signaling engine...");
-            ws = new WebSocket('wss://family-video-signaler.onrender.com');
+        const statusBadge = document.getElementById('statusBadge');
+        const callerNameInput = document.getElementById('callerNameInput');
+        const roomSecretInput = document.getElementById('roomSecretInput');
+        const connectBtn = document.getElementById('connectBtn');
+        const clearAuthBtn = document.getElementById('clearAuthBtn');
+        const startCamBtn = document.getElementById('startCamBtn');
+        const toggleMicBtn = document.getElementById('toggleMicBtn');
+        const toggleCamBtn = document.getElementById('toggleCamBtn');
+        const hangupBtn = document.getElementById('hangupBtn');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const remoteLabel = document.getElementById('remoteLabel');
+        const peerListEl = document.getElementById('peerList');
 
-            ws.onopen = () => {
-                console.log("WebSocket wire connected successfully.");
-                
-                const idDisplay = document.getElementById('myIdDisplay');
-                
-                if (isMediaActive && !myId) {
-                    idDisplay.innerText = "Re-registering...";
-                    ws.send(JSON.stringify({ 
-                        type: 'register-browser', 
-                        id: myId // If null, the server generates a new one. If populated, it re-binds your active session!
-                    }));
-                } else if (!isMediaActive) {
-                    // Fix: Update the text when loading the page for the first time
-                    idDisplay.innerText = "";
-                    idDisplay.style.color = "#ff9800"; // Orange text showing it is ready but waiting for media
-                }
-            };
+        // Load saved credentials from localStorage
+        callerNameInput.value = localStorage.getItem('bisnan_caller_name') || '';
+        roomSecretInput.value = localStorage.getItem('bisnan_room_secret') || '';
 
-
-            ws.onmessage = async (event) => {
-                const data = JSON.parse(event.data);
-                const senderId = data.senderId;
-
-                switch (data.type) {
-                    case 'registered':
-                        myId = data.id;
-                        const idDisplay = document.getElementById('myIdDisplay');
-                        idDisplay.innerText = "Connected as: " + myId;
-                        idDisplay.style.color = "#4CAF50";
-                        break;
-
-                    case 'mesh-peer-list':
-                        if (isMediaActive) {
-                            renderPeerDirectory(data.peers);
-                        }
-                        break;
-            
-                    case 'offer':
-                        if (!isMediaActive) break; 
-                        console.log("Receiving call request from: " + senderId);
-                        let pcOffer = createMeshPeerConnection(senderId);
-                        try {
-                            await pcOffer.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.sdp }));
-                            
-                            // Remote description is now set! Safely process any early queued candidates
-                            await processIceQueue(senderId); 
-                            
-                            const answer = await pcOffer.createAnswer();
-                            await pcOffer.setLocalDescription(answer);
-                            ws.send(JSON.stringify({ type: 'answer', targetId: senderId, sdp: answer.sdp }));
-                            togglePeerButton(senderId, true);
-                        } catch (err) {
-                            console.error("Error answering call:", err);
-                        }
-                        break;
-
-                    case 'answer':
-                        if (!isMediaActive) break;
-                        const pcAnswer = peerConnections.get(senderId);
-                        if (pcAnswer) {
-                            await pcAnswer.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
-                            console.log("Call handshaking completed with: " + senderId);
-                            
-                            // Remote description is now set! Safely process any early queued candidates
-                            await processIceQueue(senderId);
-                            
-                            togglePeerButton(senderId, true);
-                        }
-                        break;
-
-                    case 'ice-candidate':
-                        if (!isMediaActive) break;
-                        const pcCandidate = peerConnections.get(senderId);
-                        
-                        if (pcCandidate && pcCandidate.remoteDescription && data.candidate) {
-                            // PeerConnection exists and remote description is set. Apply immediately.
-                            await pcCandidate.addIceCandidate(new RTCIceCandidate(data.candidate));
-                        } else if (data.candidate) {
-                            // Race case: The candidate arrived too early (either RTCPeerConnection doesn't 
-                            // exist yet, or it does but setRemoteDescription hasn't finished). Queue it up!
-                            console.log(`Queueing early candidate from ${senderId} (PC exists: ${!!pcCandidate})`);
-                            if (!iceQueues.has(senderId)) iceQueues.set(senderId, []);
-                            iceQueues.get(senderId).push(data.candidate);
-                        }
-                        break;
-            
-                    case 'hangup':
-                        console.log("--> Received immediate hangup/decline command from target: " + senderId);
-                        
-                        // 1. Terminate the active RTCPeerConnection instance
-                        const activePC = peerConnections.get(senderId);
-                        if (activePC) {
-                            activePC.getSenders().forEach(sender => {
-                                if (sender.track) sender.track.stop();
-                            });
-                            activePC.close();
-                            peerConnections.delete(senderId);
-                        }
-                        
-                        // 2. Clear out any leftover ICE candidate queues for this node
-                        iceQueues.delete(senderId);
-                        
-                        // 3. Reset the UI button states instantly back to standard "Call" 
-                        togglePeerButton(senderId, false);
-                        
-                        // 4. Force clean any residual video layout slots from the DOM grid
-                        const staleVideoBox = document.getElementById(`video-box-${senderId}`);
-                        if (staleVideoBox) staleVideoBox.remove();
-                        break;
-                }
-            };
-
-            ws.onclose = () => {
-                console.warn("Signaling socket severed. Triggering scheduled revival...");
-                myId = null; 
-                
-                if (isMediaActive) {
-                    document.getElementById('myIdDisplay').innerText = "Reconnecting...";
-                    document.getElementById('myIdDisplay').style.color = "#ff9800";
-                } else {
-                    document.getElementById('myIdDisplay').innerText = "Disconnected";
-                    document.getElementById('myIdDisplay').style.color = "#f44336";
-                }
-
-                setTimeout(() => {
-                    connectSignalingServer();
-                }, 2000);
-            };
-
-            ws.onerror = (err) => {
-                console.error("Socket error encountered:", err);
-                ws.close();
-            };
+        function setStatus(text, state = '') {
+            statusBadge.textContent = text;
+            statusBadge.className = 'status-badge ' + state;
         }
 
-        // Initialize socket loop immediately on page boot
-        connectSignalingServer();
-
-        // 2. MANAGE PRIVACY & HARDWARE TOGGLE
-        async function toggleLocalMedia() {
-            const btn = document.getElementById('mediaToggleBtn');
-            
-            if (!isMediaActive) {
-                try {
-                    console.log("User requested camera access. Launching hardware layers...");
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-                    document.getElementById('localVideo').srcObject = localStream;
-                    
-                    isMediaActive = true;
-                    btn.innerText = "Stop Camera";
-                    btn.className = "privacy-btn active";
-                    document.getElementById('myIdDisplay').innerText = "Registering...";
-                    
-                    // Inside toggleLocalMedia() -> when !isMediaActive is true
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ 
-                            type: 'register-browser',
-                            id: myId 
-                        }));
-                    }
-
-                } catch (err) {
-                    console.error("Camera access denied or blocked by user:", err);
-                    alert("Could not start media: Please verify camera permissions.");
-                    document.getElementById('myIdDisplay').innerText = "Offline (Permissions Blocked)";
-                }
-            } else {
-                console.log("Privacy mode triggered. Destroying active pipelines...");
-                cleanupAllConnections();
-                
-                isMediaActive = false;
-                btn.innerText = "Start Camera";
-                btn.className = "privacy-btn";
-                
-                myId = null; 
-                document.getElementById('myIdDisplay').innerText = "Offline (Privacy Mode)";
-                document.getElementById('myIdDisplay').style.color = "#ff9800";
-                document.getElementById('peerListContainer').innerText = "";
-            }
-        }
-
-        // 3. FORCE MOBILE RE-RENDER ON CLEANUP
-        function cleanupAllConnections() {
-            console.log("Dismantling room workspace, closing active channels...");
-            
-            if (ws && ws.readyState === WebSocket.OPEN && myId) {
-                ws.send(JSON.stringify({ type: 'hangup', targetId: null }));
-            }
-
-            peerConnections.forEach((pc, peerId) => {
-                try {
-                    pc.onicecandidate = null;
-                    pc.ontrack = null;
-                    pc.close();
-                } catch(e) { 
-                    console.warn(e); 
-                }
-                const box = document.getElementById("box_" + peerId);
-                if (box) box.remove();
-            });
-            peerConnections.clear();
-            iceQueues.clear();
-
-            if (localStream) {
-                localStream.getTracks().forEach(track => {
-                    track.stop();
-                    console.log(`Track successfully halted: ${track.kind}`);
-                });
-                localStream = null;
-            }
-
-            const localVid = document.getElementById('localVideo');
-            if (localVid) {
-                localVid.srcObject = null;
-                localVid.removeAttribute('src');
-                localVid.load(); 
-            }
-        }
-
-        async function processIceQueue(peerId) {
-            const pc = peerConnections.get(peerId);
-            const queue = iceQueues.get(peerId);
-            if (pc && pc.remoteDescription && queue) {
-                console.log(`Draining ${queue.length} early queued candidates for ${peerId}`);
-                while (queue.length > 0) {
-                    const cand = queue.shift();
-                    try {
-                        await pc.addIceCandidate(new RTCIceCandidate(cand));
-                    } catch (e) {
-                        console.error("Error processing queued ICE candidate:", e);
-                    }
-                }
-            }
-        }
-
-        function renderPeerDirectory(peers) {
-            const container = document.getElementById('peerListContainer');
-            container.innerHTML = ''; 
-            let count = 0;
-
-            const activePeerIds = peers.map(p => p.id);
-            peerConnections.forEach((pc, peerId) => {
-                if (!activePeerIds.includes(peerId)) {
-                    console.log("Cleaning up dead session discovered via registry mismatch: " + peerId);
-                    teardownMeshPeer(peerId);
-                }
-            });
-
-            peers.forEach(peer => {
-                if (peer.id !== myId) {
-                    count++;
-                    const row = document.createElement('div');
-                    row.className = 'peer-row';
-                    
-                    const isConnected = peerConnections.has(peer.id);
-                    const btnText = isConnected ? "Hangup" : "Call";
-                    const btnClass = isConnected ? "hangup-btn" : "";
-                    const clickAction = isConnected ? `handleManualHangup('${peer.id}')` : `initiateOutboundCall('${peer.id}')`;
-
-                    // 100% DYNAMIC STRING GUARD (No Hardcoding):
-                    // Prioritizes the true custom name payload. If missing, it creates a clean system display string.
-                    const dynamicDisplayName = peer.name || (peer.type.charAt(0).toUpperCase() + peer.type.slice(1) + " Node");
-
-                    row.innerHTML = `
-                        <div style="display: flex; flex-direction: column; align-items: flex-start;">
-                            <span style="font-size: 16px; font-weight: bold; color: #ff9800;">${dynamicDisplayName}</span>
-                            <span style="font-size: 11px; color: #aaa;">Device Profile: ${peer.type.toUpperCase()} | ID: ${peer.id}</span>
-                        </div>
-                        <button id="btn_${peer.id}" class="${btnClass}" onclick="${clickAction}">${btnText}</button>
-                    `;
-                    container.appendChild(row);
-                }
-            });
-            if(count === 0) container.innerText = "Nobody online.";
-        }
-
-
-        function togglePeerButton(peerId, isConnected) {
-            const btn = document.getElementById(`btn_${peerId}`);
-            if (!btn) return;
-
-            btn.disabled = false; // Ensure button becomes clickable again
-
-            if (isConnected) {
-                btn.innerText = "Hangup";
-                btn.className = "hangup-btn";
-                btn.onclick = () => handleManualHangup(peerId);
-            } else {
-                btn.innerText = "Call";
-                btn.className = "";
-                btn.onclick = () => initiateOutboundCall(peerId);
-            }
-        }
-
-        async function initiateOutboundCall(targetPeerId) {
-            if(!isMediaActive) return;
-            console.log("User clicked call button. Initiating pipeline to: " + targetPeerId);
-            const btn = document.getElementById(`btn_${targetPeerId}`);
-            if (btn) { btn.innerText = "Calling..."; btn.disabled = true; }
-
-            const pc = createMeshPeerConnection(targetPeerId);
+        // Fetch temporary TURN servers dynamically from Render (keeps Metered API key hidden)
+        async function refreshIceServers(token) {
             try {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                ws.send(JSON.stringify({ type: 'offer', targetId: targetPeerId, sdp: offer.sdp }));
+                const res = await fetch(`${RENDER_HTTP_BASE}/ice-servers?token=${encodeURIComponent(token)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+                    cachedIceServers = data.iceServers;
+                }
             } catch (err) {
-                console.error("Failed creating outbound offer:", err);
-                togglePeerButton(targetPeerId, false);
+                console.warn('Could not fetch TURN servers, falling back to STUN:', err.message);
             }
         }
 
-        function handleManualHangup(targetPeerId) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'hangup', targetId: targetPeerId }));
+        async function startCamera() {
+            if (localStream) return localStream;
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                startCamBtn.textContent = 'Camera Active';
+                startCamBtn.disabled = true;
+                toggleMicBtn.disabled = false;
+                toggleCamBtn.disabled = false;
+                return localStream;
+            } catch (err) {
+                alert('Camera/Microphone permission is required: ' + err.message);
+                throw err;
             }
-            teardownMeshPeer(targetPeerId);
         }
 
-        function createMeshPeerConnection(peerId) {
-            if(peerConnections.has(peerId)) return peerConnections.get(peerId);
-
-            const pc = new RTCPeerConnection(rtcConfig);
-            peerConnections.set(peerId, pc);
-            if (!iceQueues.has(peerId)) iceQueues.set(peerId, []);
+        function createPeerConnection(targetId) {
+            if (pc) pc.close();
+            activeTargetId = targetId;
+            pc = new RTCPeerConnection({ iceServers: cachedIceServers });
 
             if (localStream) {
-                localStream.getTracks().forEach(track => {
-                    pc.addTrack(track, localStream);
-                });
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
             }
+
+            pc.ontrack = (event) => {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                }
+            };
 
             pc.onicecandidate = (event) => {
                 if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
-                    setTimeout(() => {
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'ice-candidate', targetId: peerId, candidate: event.candidate }));
-                        }
-                    }, 40); 
+                    ws.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        targetId: activeTargetId,
+                        candidate: event.candidate
+                    }));
                 }
             };
 
-            pc.ontrack = (event) => {
-                let videoElement = document.getElementById("video_" + peerId);
-                if (!videoElement) {
-                    const grid = document.getElementById('videoGrid');
-                    const box = document.createElement('div');
-                    box.className = 'video-box';
-                    box.id = "box_" + peerId;
-                    
-                    videoElement = document.createElement('video');
-                    videoElement.id = "video_" + peerId;
-                    videoElement.autoplay = true;
-                    videoElement.playsInline = true;
-                    
-                    const label = document.createElement('div');
-                    label.className = 'peer-label';
-                    label.innerText = "Peer: " + peerId;
-                    
-                    box.appendChild(videoElement);
-                    box.appendChild(label);
-                    grid.appendChild(box);
-                }
-                if (event.streams && event.streams[0]) {
-                    videoElement.srcObject = event.streams[0];
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'connected') {
+                    setStatus('In Call', 'connected');
+                    hangupBtn.disabled = false;
+                } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+                    endCallLocally();
                 }
             };
 
             return pc;
         }
 
-        function teardownMeshPeer(peerId) {
-            console.log("Executing teardown on local peer reference structures for: " + peerId);
-            
-            const pc = peerConnections.get(peerId);
-            if (pc) { 
-                try {
-                    pc.getReceivers().forEach(receiver => { 
-                        if (receiver.track) receiver.track.stop(); 
-                    });
-                    pc.close(); 
-                } catch (e) {
-                    console.warn("Context cleanup warning during track release: ", e);
-                }
-                peerConnections.delete(peerId); 
-            }
-            
-            iceQueues.delete(peerId);
+        async function callPeer(targetId, targetName) {
+            await startCamera();
+            const token = roomSecretInput.value.trim();
+            if (token) await refreshIceServers(token);
 
-            const box = document.getElementById("box_" + peerId);
-            if (box) {
-                box.remove();
-            }
-            
-            togglePeerButton(peerId, false);
+            remoteLabel.textContent = targetName || targetId;
+            setStatus(`Calling ${targetName || targetId}...`);
+            hangupBtn.disabled = false;
+
+            const peerConn = createPeerConnection(targetId);
+            const offer = await peerConn.createOffer();
+            await peerConn.setLocalDescription(offer);
+
+            ws.send(JSON.stringify({
+                type: 'offer',
+                targetId: targetId,
+                callerName: callerNameInput.value.trim() || 'Web Browser',
+                sdp: offer
+            }));
         }
-        
-    </script>
-</body>
-</html>
+
+        function endCallLocally() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            activeTargetId = null;
+            remoteVideo.srcObject = null;
+            remoteLabel.textContent = 'Remote Caller';
+            hangupBtn.disabled = true;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                setStatus('Connected', 'connected');
+            }
+        }
+        function renderPeerList(peers) {
+            peerListEl.innerHTML = '';
+            const others = peers.filter(p => p.id !== myId);
+            if (others.length === 0) {
+                const empty = document.createElement('span');
+                empty.style.color = 'var(--muted)';
+                empty.style.fontSize = '0.9rem';
+                empty.textContent = 'No other family devices online right now.';
+                peerListEl.appendChild(empty);
+                return;
+            }
+            others.forEach(peer => {
+                const row = document.createElement('div');
+                row.className = 'peer-item';
+                // Use textContent (never innerHTML) to prevent XSS from device names
+                const label = document.createElement('span');
+                label.textContent = '${ peer.name } (${ peer.type })';
+            const btn = document.createElement('button');
+            btn.textContent = 'Call';
+            btn.onclick = () => callPeer(peer.id, peer.name);
+            row.appendChild(label);
+            row.appendChild(btn);
+            peerListEl.appendChild(row);
+        });
+}
+        async function connectSignaling() {
+            const name = callerNameInput.value.trim() || 'Family Web';
+            const token = roomSecretInput.value.trim();
+            if (!token) {
+                setStatus('Secret Required', 'error');
+                return;
+            }
+            localStorage.setItem('bisnan_caller_name', name);
+            localStorage.setItem('bisnan_room_secret', token);
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            if (ws) ws.close();
+            setStatus('Connecting...');
+            await refreshIceServers(token);
+            ws = new WebSocket('${ RENDER_WS_BASE } /? token = ${ encodeURIComponent(token) }');
+            ws.onopen = () => {
+                setStatus('Connected', 'connected');
+                ws.send(JSON.stringify({
+                    type: 'register-browser',
+                    name: name
+                }));
+            };
+            ws.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                switch (data.type) {
+                    case 'registered':
+                        myId = data.id;
+                        break;
+                    case 'mesh-peer-list':
+                        renderPeerList(data.peers || []);
+                        break;
+                    case 'offer': {
+                        const accept = confirm('Incoming call from ' + (data.callerName || data.senderId) + '. Answer?');
+                        if (!accept) {
+                            ws.send(JSON.stringify({ type: 'call-decline', targetId: data.senderId }));
+                            return;
+                        }
+                        await startCamera();
+                        remoteLabel.textContent = data.callerName || data.senderId;
+                        hangupBtn.disabled = false;
+                        const peerConn = createPeerConnection(data.senderId);
+                        await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        const answer = await peerConn.createAnswer();
+                        await peerConn.setLocalDescription(answer);
+                        ws.send(JSON.stringify({
+                            type: 'answer',
+                            targetId: data.senderId,
+                            sdp: answer
+                        }));
+                        break;
+                    }
+                    case 'answer':
+                        if (pc && data.sdp) {
+                            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        }
+                        break;
+                    case 'ice-candidate':
+                        if (pc && data.candidate) {
+                            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        }
+                        break;
+                    case 'call-decline':
+                        alert('Call was declined.');
+                        endCallLocally();
+                        break;
+                    case 'hangup':
+                        endCallLocally();
+                        break;
+                }
+            };
+            ws.onclose = (event) => {
+                endCallLocally();
+                if (event.code === 1006 || event.code === 4001) {
+                    setStatus('Disconnected (Check Secret or Session)', 'error');
+                } else {
+                    setStatus('Disconnected - Retrying...', 'error');
+                    reconnectTimer = setTimeout(connectSignaling, 4000);
+                }
+            };
+            ws.onerror = () => {
+                setStatus('Connection Error', 'error');
+            };
+        }
+        connectBtn.onclick = connectSignaling;
+        clearAuthBtn.onclick = () => {
+            localStorage.removeItem('bisnan_room_secret');
+            roomSecretInput.value = '';
+            if (ws) ws.close();
+            setStatus('Disconnected');
+        };
+        startCamBtn.onclick = startCamera;
+        toggleMicBtn.onclick = () => {
+            if (!localStream) return;
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                toggleMicBtn.textContent = audioTrack.enabled ? 'Mute Mic' : 'Unmute Mic';
+            }
+        };
+        toggleCamBtn.onclick = () => {
+            if (!localStream) return;
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                toggleCamBtn.textContent = videoTrack.enabled ? 'Turn Off Video' : 'Turn On Video';
+            }
+        };
+        hangupBtn.onclick = () => {
+            if (ws && ws.readyState === WebSocket.OPEN && activeTargetId) {
+                ws.send(JSON.stringify({ type: 'hangup', targetId: activeTargetId }));
+            }
+            endCallLocally();
+        };
+        // Auto-connect on page load if secret was already saved
+        if (roomSecretInput.value.trim()) {
+            connectSignaling();
+        }
