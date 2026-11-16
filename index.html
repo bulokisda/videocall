@@ -304,9 +304,10 @@
 
       pc.ontrack = (event) => {
         if (event.streams && event.streams.length > 0) {
-          remoteVideo.srcObject = event.streams.item(0);
+          remoteVideo.srcObject = event.streams[0];
         }
       };
+
 
       pc.onicecandidate = (event) => {
         if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
